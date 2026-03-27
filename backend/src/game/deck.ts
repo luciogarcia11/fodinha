@@ -1,0 +1,62 @@
+import { Card, CardValue, Suit } from '../types';
+
+const SUITS: Suit[] = ['clubs', 'hearts', 'spades', 'diamonds'];
+const VALUES: CardValue[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
+
+// Manilhas fixas: 4♣, 7♥, A♠, 7♦
+const MANILHAS: Record<string, number> = {
+  '4-clubs':    14, // zap — mais forte
+  '7-hearts':   13,
+  'A-spades':   12,
+  '7-diamonds': 11,
+};
+
+// Força das cartas comuns (sem ser manilha)
+const COMMON_STRENGTH: Record<CardValue, number> = {
+  '3': 10,
+  '2': 9,
+  'A': 8,
+  'K': 7,
+  'J': 6,
+  'Q': 5,
+  '7': 4,
+  '6': 3,
+  '5': 2,
+  '4': 1,
+};
+
+export function buildDeck(): Card[] {
+  const deck: Card[] = [];
+
+  for (const suit of SUITS) {
+    for (const value of VALUES) {
+      const key = `${value}-${suit}`;
+      const isManilha = key in MANILHAS;
+      const strength = isManilha ? MANILHAS[key] : COMMON_STRENGTH[value];
+
+      deck.push({ value, suit, isManilha, strength });
+    }
+  }
+
+  return deck;
+}
+
+export function shuffleDeck(deck: Card[]): Card[] {
+  const shuffled = [...deck];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+export function dealCards(deck: Card[], playerCount: number, cardsPerPlayer: number): Card[][] {
+  const hands: Card[][] = Array.from({ length: playerCount }, () => []);
+  for (let i = 0; i < cardsPerPlayer; i++) {
+    for (let j = 0; j < playerCount; j++) {
+      const card = deck.pop();
+      if (card) hands[j].push(card);
+    }
+  }
+  return hands;
+}

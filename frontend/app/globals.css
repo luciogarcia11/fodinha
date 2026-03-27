@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0f4c2a;
+  color: white;
+  font-family: 'Segoe UI', sans-serif;
+}
