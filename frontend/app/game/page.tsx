@@ -26,31 +26,29 @@ function GameContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const roomCode = searchParams.get("room");
-  const [selectedCard, setSelectedCard] = useState<number | null>(null);
-  const [showRoundEnd, setShowRoundEnd] = useState(false);
+  const [selectedCardState, setSelectedCardState] = useState<{
+    turnId: string | null;
+    idx: number | null;
+  }>({ turnId: null, idx: null });
+  const selectedCard =
+    selectedCardState.turnId === gameState?.currentTurn
+      ? selectedCardState.idx
+      : null;
   const [showRules, setShowRules] = useState(false);
   const [showQuit, setShowQuit] = useState(false);
 
   useEffect(() => {
     if (!gameState) return;
     if (gameState.phase === "lobby") router.push(`/lobby?room=${roomCode}`);
-  }, [gameState?.phase]);
+  }, [gameState, roomCode, router]);
 
   useEffect(() => {
-    if (roundEnd) {
-      setShowRoundEnd(true);
-      const t = setTimeout(() => {
-        setShowRoundEnd(false);
-        clearRoundEnd();
-      }, 4000);
-      return () => clearTimeout(t);
-    }
-  }, [roundEnd]);
-
-  // Limpa carta selecionada ao mudar de turno
-  useEffect(() => {
-    setSelectedCard(null);
-  }, [gameState?.currentTurn]);
+    if (!roundEnd) return;
+    const t = setTimeout(() => {
+      clearRoundEnd();
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [roundEnd, clearRoundEnd]);
 
   if (!gameState) {
     return (
@@ -109,12 +107,12 @@ function GameContent() {
     activePlayers[gameState.dealerIndex % activePlayers.length];
 
   function handleCardClick(idx: number) {
-    if (!isMyTurn || gameState?.phase !== "playing") return;
+    if (!gameState || !isMyTurn || gameState.phase !== "playing") return;
     if (selectedCard === idx) {
       playCard(idx);
-      setSelectedCard(null);
+      setSelectedCardState({ turnId: gameState.currentTurn, idx: null });
     } else {
-      setSelectedCard(idx);
+      setSelectedCardState({ turnId: gameState.currentTurn, idx });
     }
   }
 
@@ -533,7 +531,7 @@ function GameContent() {
       )}
 
       {/* Painel fim de rodada */}
-      {showRoundEnd && roundEnd && (
+      {roundEnd && (
         <div className="absolute inset-0 bg-black/75 flex items-center justify-center z-40 p-4">
           <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
             <h2 className="text-xl font-black text-yellow-400 text-center mb-4">

@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { Card } from '@/lib/types';
-import { SUIT_SYMBOLS, SUIT_COLORS, isRedSuit } from '@/lib/cardUtils';
+import { SUIT_SYMBOLS, SUIT_COLORS } from '@/lib/cardUtils';
 
 interface CardProps {
   card?: Card;
@@ -22,31 +22,33 @@ export default function CardComponent({
   disabled = false,
 }: CardProps) {
   const base = small
-    ? 'w-10 h-14 rounded text-xs'
+    ? 'w-12 h-18 rounded text-xs'
     : 'w-16 h-24 rounded-lg text-sm';
 
   if (hidden || !card) {
     return (
       <motion.div
-        className={`${base} bg-blue-800 border-2 border-blue-600 flex items-center justify-center cursor-default select-none`}
-        whileHover={onClick ? { y: -4 } : {}}
+        className={`${base} bg-blue-800 border-2 border-blue-600 flex items-center justify-center select-none ${onClick && !disabled ? 'cursor-pointer' : 'cursor-default'}`}
+        whileHover={onClick && !disabled ? { y: -4 } : {}}
+        whileTap={onClick && !disabled ? { scale: 0.97 } : {}}
+        onClick={!disabled ? onClick : undefined}
       >
         <span className="text-blue-400 text-lg">🂠</span>
       </motion.div>
     );
   }
 
-  const red = isRedSuit(card.suit);
   const suitSymbol = SUIT_SYMBOLS[card.suit];
   const suitColor = SUIT_COLORS[card.suit];
 
   return (
     <motion.div
       className={`
-        ${base} bg-white border-2 flex flex-col justify-between p-1 select-none
+        ${base} bg-white border-2 flex flex-col justify-between p-1 select-none relative
         ${selected ? 'border-yellow-400 shadow-yellow-300 shadow-lg' : 'border-gray-300'}
         ${onClick && !disabled ? 'cursor-pointer' : 'cursor-default'}
         ${card.isManilha ? 'ring-2 ring-yellow-400' : ''}
+        ${small ? 'overflow-hidden' : ''}
       `}
       whileHover={onClick && !disabled ? { y: -8, scale: 1.05 } : {}}
       whileTap={onClick && !disabled ? { scale: 0.97 } : {}}
@@ -54,15 +56,15 @@ export default function CardComponent({
       transition={{ type: 'spring', stiffness: 300, damping: 20 }}
       onClick={!disabled ? onClick : undefined}
     >
-      <div className={`font-bold leading-none ${suitColor} ${small ? 'text-xs' : 'text-sm'}`}>
+      <div className={`font-bold leading-none ${suitColor} ${small ? 'text-[11px]' : 'text-sm'}`}>
         {card.value}
         <br />
         <span>{suitSymbol}</span>
       </div>
-      <div className={`text-center font-bold ${suitColor} ${small ? 'text-base' : 'text-xl'}`}>
+      <div className={`text-center font-bold ${suitColor} ${small ? 'text-[15px]' : 'text-xl'}`}>
         {suitSymbol}
       </div>
-      <div className={`font-bold leading-none rotate-180 ${suitColor} ${small ? 'text-xs' : 'text-sm'}`}>
+      <div className={`font-bold leading-none rotate-180 ${suitColor} ${small ? 'text-[11px]' : 'text-sm'}`}>
         {card.value}
         <br />
         <span>{suitSymbol}</span>
