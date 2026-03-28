@@ -69,75 +69,71 @@ function LobbyContent() {
         </div>
       </div>
 
-      {isHost && (
-        <div className="bg-white/10 rounded-2xl p-4 w-full max-w-sm">
-          <h2 className="font-bold text-lg mb-3">⚙️ Configurações</h2>
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Vidas por jogador</span>
-              {isHost ? (
-                <select
-                  className="bg-white/20 text-white rounded px-2 py-1 text-sm"
-                  value={gameState.config.livesPerPlayer}
-                  onChange={(e) =>
-                    updateConfig({ livesPerPlayer: Number(e.target.value) })
-                  }
-                >
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n} className="text-gray-900">
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-yellow-400 font-bold text-sm">
-                  {gameState.config.livesPerPlayer}
-                </span>
-              )}
-            </div>
+      <div className="bg-white/10 rounded-2xl p-4 w-full max-w-sm">
+        <h2 className="font-bold text-lg mb-3">⚙️ Configurações</h2>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm">Vidas por jogador</span>
+            {isHost ? (
+              <select
+                className="bg-white/20 text-white rounded px-2 py-1 text-sm"
+                value={gameState.config.livesPerPlayer}
+                onChange={(e) =>
+                  updateConfig({ livesPerPlayer: Number(e.target.value) })
+                }
+              >
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n} className="text-gray-900">
+                    {n}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-yellow-400 font-bold text-sm">
+                {gameState.config.livesPerPlayer}
+              </span>
+            )}
+          </div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Regra FDP</span>
-              {isHost ? (
-                <input
-                  type="checkbox"
-                  className="w-5 h-5 accent-yellow-400"
-                  checked={gameState.config.fdpRule}
-                  onChange={(e) => updateConfig({ fdpRule: e.target.checked })}
-                />
-              ) : (
-                <span
-                  className={`text-sm font-bold ${gameState.config.fdpRule ? "text-green-400" : "text-white/40"}`}
-                >
-                  {gameState.config.fdpRule ? "✓ Ativa" : "✗ Inativa"}
-                </span>
-              )}
-            </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">Regra FDP</span>
+            {isHost ? (
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-yellow-400"
+                checked={gameState.config.fdpRule}
+                onChange={(e) => updateConfig({ fdpRule: e.target.checked })}
+              />
+            ) : (
+              <span
+                className={`text-sm font-bold ${gameState.config.fdpRule ? "text-green-400" : "text-white/40"}`}
+              >
+                {gameState.config.fdpRule ? "✓ Ativa" : "✗ Inativa"}
+              </span>
+            )}
+          </div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Carta na Testa</span>
-              {isHost ? (
-                <input
-                  type="checkbox"
-                  className="w-5 h-5 accent-yellow-400"
-                  checked={gameState.config.cardOnForeheadRule}
-                  onChange={(e) =>
-                    updateConfig({ cardOnForeheadRule: e.target.checked })
-                  }
-                />
-              ) : (
-                <span
-                  className={`text-sm font-bold ${gameState.config.cardOnForeheadRule ? "text-green-400" : "text-white/40"}`}
-                >
-                  {gameState.config.cardOnForeheadRule
-                    ? "✓ Ativa"
-                    : "✗ Inativa"}
-                </span>
-              )}
-            </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">Carta na Testa</span>
+            {isHost ? (
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-yellow-400"
+                checked={gameState.config.cardOnForeheadRule}
+                onChange={(e) =>
+                  updateConfig({ cardOnForeheadRule: e.target.checked })
+                }
+              />
+            ) : (
+              <span
+                className={`text-sm font-bold ${gameState.config.cardOnForeheadRule ? "text-green-400" : "text-white/40"}`}
+              >
+                {gameState.config.cardOnForeheadRule ? "✓ Ativa" : "✗ Inativa"}
+              </span>
+            )}
           </div>
         </div>
-      )}
+      </div>
 
       {isHost && (
         <button
