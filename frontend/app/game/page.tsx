@@ -527,7 +527,11 @@ function GameContent() {
                 Cancelar
               </button>
               <button
-                onClick={() => router.push("/")}
+                onClick={() => {
+                  quitGame();
+                  window.location.href =
+                    "https://fodinhamineirafront.vercel.app/";
+                }}
                 className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg"
               >
                 Sair
