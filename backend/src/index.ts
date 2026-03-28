@@ -108,6 +108,7 @@ io.on("connection", (socket) => {
       const state = getRoom(roomId);
       if (!state || state.phase !== "playing") return;
       if (state.currentTurn !== socket.id) return;
+      if (state.resolvingTrick) return;
 
       const player = state.players.find((p) => p.id === socket.id);
       if (!player || cardIndex < 0 || cardIndex >= player.hand.length) return;
@@ -118,9 +119,12 @@ io.on("connection", (socket) => {
       const activePlayers = state.players.filter((p) => !p.isEliminated);
 
       if (state.currentTrick.length === activePlayers.length) {
+        state.resolvingTrick = true;
         io.to(roomId).emit("game:stateUpdate", state);
 
         setTimeout(() => {
+          state.resolvingTrick = false;
+
           const winnerId = resolveVaza(
             state.currentTrick,
             state.config.fdpRule,

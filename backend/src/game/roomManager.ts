@@ -41,7 +41,8 @@ export function createRoom(hostId: string, hostName: string): GameState {
     currentTrick: [],
     trickLeader: hostId,
     trickNumber: 1,
-    dealerIndex: 0, // host é o pé na primeira rodada
+    dealerIndex: 0,
+    resolvingTrick: false,
     config,
   };
 
@@ -107,11 +108,9 @@ export function dealRound(state: GameState): GameState {
     p.hand = hands[i];
   });
 
-  // Ordem de apostas: começa DEPOIS do pé, o pé aposta por último
   const dealerIdx = state.dealerIndex % activePlayers.length;
   const firstBetIdx = (dealerIdx + 1) % activePlayers.length;
 
-  // Rotaciona a lista de apostas: primeiro a falar é quem está após o pé
   const bettingOrder: string[] = [];
   for (let i = 0; i < activePlayers.length; i++) {
     const idx = (firstBetIdx + i) % activePlayers.length;
@@ -123,11 +122,10 @@ export function dealRound(state: GameState): GameState {
   state.tricksTaken = Object.fromEntries(activePlayers.map(p => [p.id, 0]));
   state.currentTrick = [];
   state.trickNumber = 1;
-
-  // Primeiro a jogar também começa após o pé
   state.trickLeader = bettingOrder[0];
   state.currentTurn = bettingOrder[0];
   state.phase = 'betting';
+  state.resolvingTrick = false;
 
   return state;
 }

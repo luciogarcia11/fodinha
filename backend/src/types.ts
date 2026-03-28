@@ -52,6 +52,7 @@ export interface GameState {
   currentTrick: PlayedCard[];
   trickLeader: string;
   trickNumber: number;
-  dealerIndex: number; // índice do pé na lista de jogadores ativos
+  dealerIndex: number;
+  resolvingTrick: boolean; // 👈 novo campo
   config: GameConfig;
 }
