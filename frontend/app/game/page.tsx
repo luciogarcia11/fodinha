@@ -408,13 +408,10 @@ function GameContent() {
         </div>
 
         <button
-          onClick={() => {
-            quitGame();
-            window.location.href = "https://fodinhamineirafront.vercel.app/";
-          }}
-          className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg"
+          onClick={() => setShowQuit(true)}
+          className="flex items-center gap-1 text-xs text-red-400/70 hover:text-red-400 transition-all bg-red-900/20 hover:bg-red-900/40 px-3 py-1.5 rounded-lg"
         >
-          Sair
+          🚪 Sair
         </button>
       </div>
 
