@@ -5,10 +5,9 @@ import { useGameContext } from "@/lib/gameContext";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import CardComponent from "@/components/game/CardComponent";
-import { Player } from "@/lib/types";
+import { Player, TrickResult } from "@/lib/types";
 import FanCards from "@/components/game/FanCards";
 
-// Hierarquia para exibir na legenda
 const CARD_ORDER = "4♣ > 7♥ > A♠ > 7♦ > 3 > 2 > A > K > J > Q > 7 > 6 > 5 > 4";
 
 function GameContent() {
@@ -20,6 +19,7 @@ function GameContent() {
     trickResult,
     roundEnd,
     winnerId,
+    clearRoundEnd,
     quitGame,
   } = useGameContext();
 
@@ -36,7 +36,13 @@ function GameContent() {
       : null;
   const [showRules, setShowRules] = useState(false);
   const [showQuit, setShowQuit] = useState(false);
-  const [showTrickResult, setShowTrickResult] = useState(false);
+  const [trickResultVisible, setTrickResultVisible] = useState<boolean>(false);
+  const [prevTrickResult, setPrevTrickResult] = useState<TrickResult | null>(null);
+
+  if (trickResult !== prevTrickResult) {
+    setPrevTrickResult(trickResult);
+    setTrickResultVisible(!!trickResult);
+  }
 
   useEffect(() => {
     if (!gameState) return;
@@ -44,14 +50,22 @@ function GameContent() {
   }, [gameState, roomCode, router]);
 
   useEffect(() => {
-    if (!trickResult) return;
+    if (trickResultVisible && trickResult) {
+      const t = setTimeout(() => {
+        setTrickResultVisible(false);
+      }, 2000);
+      return () => clearTimeout(t);
+    }
+  }, [trickResultVisible, trickResult]);
+
+  // Some com o painel de fim de rodada após 4 segundos
+  useEffect(() => {
+    if (!roundEnd) return;
     const t = setTimeout(() => {
-      // trickResult some sozinho quando o próximo stateUpdate chegar
-      // mas forçamos via state local para sumir visualmente
-      setShowTrickResult(false);
-    }, 2000);
+      clearRoundEnd();
+    }, 4000);
     return () => clearTimeout(t);
-  }, [trickResult]);
+  }, [roundEnd, clearRoundEnd]);
 
   if (!gameState) {
     return (
@@ -61,7 +75,6 @@ function GameContent() {
     );
   }
 
-  // Fim de jogo
   if (gameState.phase === "game_over" || winnerId) {
     const winner = gameState.players.find((p) => p.id === winnerId);
     return (
@@ -87,16 +100,13 @@ function GameContent() {
   const activePlayers = gameState.players.filter((p) => !p.isEliminated);
   const isMyTurn = gameState.currentTurn === myId;
 
-  // Carta na testa: só na rodada com 1 carta E regra ativa
   const isCardOnForehead =
     gameState.config.cardOnForeheadRule && gameState.cardsThisRound === 1;
 
-  // Fase de apostas
   const isBetting = gameState.phase === "betting";
   const isMyBetTurn = isBetting && gameState.currentTurn === myId;
   const alreadyBet = myId in gameState.bets;
 
-  // Aposta proibida (pé não pode deixar soma igual ao nº de vazas)
   const bettingIdx = gameState.bettingOrder.indexOf(myId);
   const isLastBetter = bettingIdx === gameState.bettingOrder.length - 1;
   const currentBetSum = Object.values(gameState.bets).reduce(
@@ -108,7 +118,6 @@ function GameContent() {
       ? gameState.cardsThisRound - currentBetSum
       : -1;
 
-  // Pé da rodada
   const dealerPlayer =
     activePlayers[gameState.dealerIndex % activePlayers.length];
 
@@ -138,9 +147,6 @@ function GameContent() {
     );
     const bet = gameState!.bets[player.id];
     const taken = gameState!.tricksTaken[player.id] ?? 0;
-
-    // Na carta na testa: outros jogadores têm cartas VISÍVEIS para mim
-    // A minha carta que fica oculta (tratado na minha mão abaixo)
     const showOtherCards = isCardOnForehead && !player.isEliminated;
 
     return (
@@ -167,8 +173,6 @@ function GameContent() {
             {taken}/{bet}
           </div>
         )}
-
-        {/* Carta jogada na mesa OU cartas na mão */}
         {cardOnTable ? (
           <CardComponent card={cardOnTable.card} small />
         ) : player.isEliminated ? (
@@ -176,14 +180,12 @@ function GameContent() {
             💀 Eliminado
           </span>
         ) : showOtherCards ? (
-          // Carta na testa: mostra as cartas reais do oponente lado a lado
           <div className="flex gap-0.5 flex-wrap justify-center max-w-28">
             {player.hand.map((card, i) => (
               <CardComponent key={i} card={card} hidden={false} small />
             ))}
           </div>
         ) : (
-          // Normal: leque compacto
           <FanCards count={player.hand.length} />
         )}
       </div>
@@ -218,17 +220,12 @@ function GameContent() {
 
       {/* Mesa central */}
       <div className="flex-1 flex flex-col items-center justify-center gap-3 px-4">
-        {/* Cartas jogadas na vaza atual */}
-        <div
-          className="flex gap-3 flex-wrap justify-center min-h-28 items-center
-          bg-green-900/30 rounded-2xl px-6 py-4 w-full max-w-lg border border-green-700/30"
-        >
+
+        {/* Cartas na mesa */}
+        <div className="flex gap-3 flex-wrap justify-center min-h-28 items-center bg-green-900/30 rounded-2xl px-6 py-4 w-full max-w-lg border border-green-700/30">
           {gameState.currentTrick.length > 0 ? (
             gameState.currentTrick.map((t) => (
-              <div
-                key={t.playerId}
-                className="flex flex-col items-center gap-1"
-              >
+              <div key={t.playerId} className="flex flex-col items-center gap-1">
                 <CardComponent card={t.card} />
                 <span className="text-xs text-white/50">
                   {gameState.players.find((p) => p.id === t.playerId)?.name}
@@ -240,8 +237,8 @@ function GameContent() {
           )}
         </div>
 
-        {/* Resultado da vaza */}
-        {showTrickResult && trickResult && (
+        {/* Resultado da vaza — aparece 2s após todos jogarem, some após 2s */}
+        {trickResultVisible && trickResult && (
           <div className="bg-black/80 border border-yellow-400/30 rounded-2xl px-8 py-4 text-center">
             {trickResult.winnerId ? (
               <div className="flex flex-col items-center gap-1">
@@ -278,26 +275,19 @@ function GameContent() {
                   forbiddenBet >= 0 &&
                   forbiddenBet <= gameState.cardsThisRound && (
                     <p className="text-red-400 text-xs mb-2">
-                      Proibido apostar {forbiddenBet} (soma ficaria igual ao nº
-                      de vazas)
+                      Proibido apostar {forbiddenBet} (soma ficaria igual ao nº de vazas)
                     </p>
                   )}
                 <div className="flex gap-2 flex-wrap justify-center">
-                  {Array.from(
-                    { length: gameState.cardsThisRound + 1 },
-                    (_, i) => i,
-                  ).map((n) => (
+                  {Array.from({ length: gameState.cardsThisRound + 1 }, (_, i) => i).map((n) => (
                     <button
                       key={n}
                       onClick={() => placeBet(n)}
-                      disabled={
-                        gameState.cardsThisRound > 1 && n === forbiddenBet
-                      }
+                      disabled={gameState.cardsThisRound > 1 && n === forbiddenBet}
                       className={`w-11 h-11 rounded-lg font-bold text-lg transition-all
-                        ${
-                          gameState.cardsThisRound > 1 && n === forbiddenBet
-                            ? "bg-white/10 text-white/20 cursor-not-allowed line-through"
-                            : "bg-yellow-400 hover:bg-yellow-300 text-gray-900 active:scale-95"
+                        ${gameState.cardsThisRound > 1 && n === forbiddenBet
+                          ? "bg-white/10 text-white/20 cursor-not-allowed line-through"
+                          : "bg-yellow-400 hover:bg-yellow-300 text-gray-900 active:scale-95"
                         }`}
                     >
                       {n}
@@ -314,28 +304,18 @@ function GameContent() {
                 </p>
                 <p className="text-white/40 text-xs mt-1">
                   Vez de{" "}
-                  {
-                    gameState.players.find(
-                      (p) => p.id === gameState.currentTurn,
-                    )?.name
-                  }
+                  {gameState.players.find((p) => p.id === gameState.currentTurn)?.name}
                 </p>
-                {/* Apostas já feitas */}
                 <div className="flex gap-2 flex-wrap justify-center mt-2">
                   {gameState.bettingOrder.map((id) => {
                     const p = gameState.players.find((x) => x.id === id);
                     const b = gameState.bets[id];
                     return (
-                      <div
-                        key={id}
-                        className="text-xs bg-white/10 rounded px-2 py-1"
-                      >
+                      <div key={id} className="text-xs bg-white/10 rounded px-2 py-1">
                         {p?.name}:{" "}
                         {b !== undefined ? (
                           <span className="text-yellow-300 font-bold">{b}</span>
-                        ) : (
-                          "..."
-                        )}
+                        ) : ("...")}
                       </div>
                     );
                   })}
@@ -347,10 +327,8 @@ function GameContent() {
 
         {/* Indicador de turno */}
         {gameState.phase === "playing" && (
-          <div
-            className={`rounded-xl px-4 py-2 text-sm font-bold text-center
-            ${isMyTurn ? "bg-yellow-400 text-gray-900" : "bg-white/10 text-white/60"}`}
-          >
+          <div className={`rounded-xl px-4 py-2 text-sm font-bold text-center
+            ${isMyTurn ? "bg-yellow-400 text-gray-900" : "bg-white/10 text-white/60"}`}>
             {isMyTurn
               ? selectedCard !== null
                 ? "👆 Clique na carta novamente para jogar!"
@@ -365,16 +343,11 @@ function GameContent() {
         <div className="flex flex-col items-center gap-2 pb-2 pt-2 shrink-0 bg-black/20">
           <div className="flex items-center gap-3 text-sm">
             <span className="font-bold">{me.name}</span>
-            <span>
-              {renderLives(me.lives, gameState.config.livesPerPlayer)}
-            </span>
-            {dealerPlayer?.id === myId && (
-              <span title="Você é o pé">🦶 Pé</span>
-            )}
+            <span>{renderLives(me.lives, gameState.config.livesPerPlayer)}</span>
+            {dealerPlayer?.id === myId && <span title="Você é o pé">🦶 Pé</span>}
             {gameState.bets[myId] !== undefined && (
               <span className="text-yellow-300 font-mono">
-                apostei {gameState.bets[myId]} | fiz{" "}
-                {gameState.tricksTaken[myId] ?? 0}
+                apostei {gameState.bets[myId]} | fiz {gameState.tricksTaken[myId] ?? 0}
               </span>
             )}
           </div>
@@ -404,7 +377,7 @@ function GameContent() {
         </div>
       )}
 
-      {/* Footer: Regras + Sair */}
+      {/* Footer */}
       <div className="flex items-center justify-between px-4 py-2 bg-black/40 shrink-0 gap-2">
         <button
           onClick={() => setShowRules(true)}
@@ -412,13 +385,9 @@ function GameContent() {
         >
           📖 Regras
         </button>
-
         <div className="flex gap-2 text-xs text-white/30 font-mono">
-          <span>
-            Vazas: {gameState.trickNumber - 1}/{gameState.cardsThisRound}
-          </span>
+          <span>Vazas: {gameState.trickNumber - 1}/{gameState.cardsThisRound}</span>
         </div>
-
         <button
           onClick={() => setShowQuit(true)}
           className="flex items-center gap-1 text-xs text-red-400/70 hover:text-red-400 transition-all bg-red-900/20 hover:bg-red-900/40 px-3 py-1.5 rounded-lg"
@@ -431,86 +400,43 @@ function GameContent() {
       {showRules && (
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
-            <h2 className="text-xl font-black text-yellow-400 mb-4">
-              📖 Regras da Partida
-            </h2>
-
+            <h2 className="text-xl font-black text-yellow-400 mb-4">📖 Regras da Partida</h2>
             <div className="flex flex-col gap-3 text-sm text-white/80">
               <div className="bg-white/5 rounded-lg p-3">
                 <h3 className="font-bold text-white mb-1">🃏 Rodadas</h3>
-                <p>
-                  Começam com 1 carta, sobem até o máximo (
-                  {gameState.config.maxRounds} cartas) e voltam. Quem errar a
-                  aposta perde uma vida.
-                </p>
+                <p>Começam com 1 carta, sobem até o máximo ({gameState.config.maxRounds} cartas) e voltam. Quem errar a aposta perde uma vida.</p>
               </div>
-
               <div className="bg-white/5 rounded-lg p-3">
-                <h3 className="font-bold text-white mb-1">
-                  🔥 Ordem das Cartas
-                </h3>
-                <p className="font-mono text-xs leading-relaxed">
-                  {CARD_ORDER}
-                </p>
-                <p className="text-xs text-yellow-300 mt-1">
-                  4♣, 7♥, A♠ e 7♦ são manilhas (mais fortes)
-                </p>
+                <h3 className="font-bold text-white mb-1">🔥 Ordem das Cartas</h3>
+                <p className="font-mono text-xs leading-relaxed">{CARD_ORDER}</p>
+                <p className="text-xs text-yellow-300 mt-1">4♣, 7♥, A♠ e 7♦ são manilhas (mais fortes)</p>
               </div>
-
               <div className="bg-white/5 rounded-lg p-3">
                 <h3 className="font-bold text-white mb-1">🦶 O Pé</h3>
-                <p>
-                  O pé é o último a apostar. Ele{" "}
-                  <strong className="text-red-400">não pode</strong> fazer a
-                  soma das apostas ficar igual ao número de vazas da rodada.
-                </p>
+                <p>O pé é o último a apostar. A partir da 2ª rodada, ele <strong className="text-red-400">não pode</strong> fazer a soma das apostas ficar igual ao número de vazas.</p>
               </div>
-
               <div className="bg-white/5 rounded-lg p-3">
                 <h3 className="font-bold text-white mb-1">🤝 Empate na Vaza</h3>
                 <p>Se as cartas mais fortes empatarem, ninguém faz a vaza.</p>
                 {gameState.config.fdpRule && (
-                  <p className="text-yellow-300 mt-1">
-                    ⚡ FDP ativo: cartas comuns iguais se anulam. Manilhas nunca
-                    se anulam.
-                  </p>
+                  <p className="text-yellow-300 mt-1">⚡ FDP ativo: cartas comuns iguais se anulam. Manilhas nunca se anulam.</p>
                 )}
               </div>
-
               <div className="bg-white/5 rounded-lg p-3">
-                <h3 className="font-bold text-white mb-1">
-                  ❤️ Vidas e Eliminação
-                </h3>
-                <p>
-                  Cada jogador começa com {gameState.config.livesPerPlayer} vida
-                  {gameState.config.livesPerPlayer > 1 ? "s" : ""}. Errar a
-                  aposta = -1 vida. Com 0 vidas, é eliminado.
-                </p>
+                <h3 className="font-bold text-white mb-1">❤️ Vidas e Eliminação</h3>
+                <p>Cada jogador começa com {gameState.config.livesPerPlayer} vida{gameState.config.livesPerPlayer > 1 ? "s" : ""}. Errar a aposta = -1 vida. Com 0 vidas, é eliminado.</p>
               </div>
-
               {gameState.config.cardOnForeheadRule && (
                 <div className="bg-white/5 rounded-lg p-3">
-                  <h3 className="font-bold text-white mb-1">
-                    👀 Carta na Testa
-                  </h3>
-                  <p>
-                    Na rodada de 1 carta, você não vê a sua — mas vê a de todos
-                    os outros!
-                  </p>
+                  <h3 className="font-bold text-white mb-1">👀 Carta na Testa</h3>
+                  <p>Na rodada de 1 carta, você não vê a sua — mas vê a de todos os outros!</p>
                 </div>
               )}
-
               <div className="bg-white/5 rounded-lg p-3">
-                <h3 className="font-bold text-white mb-1">
-                  💀 Eliminação Simultânea
-                </h3>
-                <p>
-                  Se dois ou mais jogadores perderem a última vida na mesma
-                  rodada, todos são eliminados juntos.
-                </p>
+                <h3 className="font-bold text-white mb-1">💀 Eliminação Simultânea</h3>
+                <p>Se dois ou mais jogadores perderem a última vida na mesma rodada, todos são eliminados juntos.</p>
               </div>
             </div>
-
             <button
               onClick={() => setShowRules(false)}
               className="mt-4 w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2 rounded-lg"
@@ -525,9 +451,7 @@ function GameContent() {
       {showQuit && (
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-xs text-center">
-            <h2 className="text-xl font-black text-red-400 mb-2">
-              🚪 Sair da Partida?
-            </h2>
+            <h2 className="text-xl font-black text-red-400 mb-2">🚪 Sair da Partida?</h2>
             <p className="text-white/60 text-sm mb-6">
               Você será eliminado e os outros jogadores continuarão sem você.
             </p>
@@ -541,8 +465,7 @@ function GameContent() {
               <button
                 onClick={() => {
                   quitGame();
-                  window.location.href =
-                    "https://fodinhamineirafront.vercel.app/";
+                  window.location.href = "https://fodinhamineirafront.vercel.app/";
                 }}
                 className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg"
               >
@@ -578,20 +501,8 @@ function GameContent() {
                     </div>
                     <span className="text-xs">
                       apostou {bet}, fez {taken} →{" "}
-                      <span
-                        className={
-                          eliminado
-                            ? "text-red-400 font-black"
-                            : acertou
-                              ? "text-green-400"
-                              : "text-red-400"
-                        }
-                      >
-                        {eliminado
-                          ? "ELIMINADO"
-                          : acertou
-                            ? "✓ ok"
-                            : "✗ -1 vida"}
+                      <span className={eliminado ? "text-red-400 font-black" : acertou ? "text-green-400" : "text-red-400"}>
+                        {eliminado ? "ELIMINADO" : acertou ? "✓ ok" : "✗ -1 vida"}
                       </span>
                     </span>
                   </div>
