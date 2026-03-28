@@ -240,15 +240,25 @@ function GameContent() {
 
         {/* Resultado da vaza */}
         {trickResult && (
-          <div className="bg-black/60 rounded-xl px-6 py-2 text-center">
+          <div className="bg-black/80 border border-yellow-400/30 rounded-2xl px-8 py-4 text-center animate-bounce">
             {trickResult.winnerId ? (
-              <p className="text-yellow-400 font-bold">
-                {trickResult.winnerId === myId
-                  ? "🎉 Você fez a vaza!"
-                  : `${gameState.players.find((p) => p.id === trickResult.winnerId)?.name} fez a vaza!`}
-              </p>
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-3xl">
+                  {trickResult.winnerId === myId ? "🎉" : "🃏"}
+                </span>
+                <p className="text-yellow-400 font-black text-lg">
+                  {trickResult.winnerId === myId
+                    ? "Você fez a vaza!"
+                    : `${gameState.players.find((p) => p.id === trickResult.winnerId)?.name} fez a vaza!`}
+                </p>
+              </div>
             ) : (
-              <p className="text-white/60 font-bold">🤝 Ninguém fez a vaza!</p>
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-3xl">🤝</span>
+                <p className="text-white/80 font-black text-lg">
+                  Ninguém fez a vaza!
+                </p>
+              </div>
             )}
           </div>
         )}
