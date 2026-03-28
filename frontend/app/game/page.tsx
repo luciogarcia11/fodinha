@@ -34,6 +34,8 @@ function GameContent() {
     selectedCardState.turnId === gameState?.currentTurn
       ? selectedCardState.idx
       : null;
+  const [showTrickResult, setShowTrickResult] = useState(false);
+  const [showRoundEndOverlay, setShowRoundEndOverlay] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [showQuit, setShowQuit] = useState(false);
 
@@ -43,12 +45,29 @@ function GameContent() {
   }, [gameState, roomCode, router]);
 
   useEffect(() => {
-    if (!roundEnd) return;
-    const t = setTimeout(() => {
+    if (!roundEnd) {
+      setShowRoundEndOverlay(false);
+      return;
+    }
+    const showTimer = setTimeout(() => setShowRoundEndOverlay(true), 900);
+    const clearTimer = setTimeout(() => {
       clearRoundEnd();
-    }, 4000);
-    return () => clearTimeout(t);
+      setShowRoundEndOverlay(false);
+    }, 5000);
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(clearTimer);
+    };
   }, [roundEnd, clearRoundEnd]);
+
+  useEffect(() => {
+    if (!trickResult) {
+      setShowTrickResult(false);
+      return;
+    }
+    const t = setTimeout(() => setShowTrickResult(true), 900);
+    return () => clearTimeout(t);
+  }, [trickResult]);
 
   if (!gameState) {
     return (
@@ -94,11 +113,13 @@ function GameContent() {
   // Aposta proibida (pé não pode deixar soma igual ao nº de vazas)
   const bettingIdx = gameState.bettingOrder.indexOf(myId);
   const isLastBetter = bettingIdx === gameState.bettingOrder.length - 1;
+  const isFirstRound = gameState.round === 1;
   const currentBetSum = Object.values(gameState.bets).reduce(
     (a, b) => a + b,
     0,
   );
-  const forbiddenBet = isLastBetter
+  const isRestrictionActive = isLastBetter && !isFirstRound;
+  const forbiddenBet = isRestrictionActive
     ? gameState.cardsThisRound - currentBetSum
     : -1;
 
@@ -235,7 +256,7 @@ function GameContent() {
         </div>
 
         {/* Resultado da vaza */}
-        {trickResult && (
+          {trickResult && showTrickResult && (
           <div className="bg-black/60 rounded-xl px-6 py-2 text-center">
             {trickResult.winnerId ? (
               <p className="text-yellow-400 font-bold">
@@ -257,7 +278,7 @@ function GameContent() {
                 <p className="text-white font-bold mb-1">
                   Quantas vazas você vai fazer?
                 </p>
-                {isLastBetter &&
+                {isRestrictionActive &&
                   forbiddenBet >= 0 &&
                   forbiddenBet <= gameState.cardsThisRound && (
                     <p className="text-red-400 text-xs mb-2">
@@ -273,7 +294,7 @@ function GameContent() {
                     <button
                       key={n}
                       onClick={() => placeBet(n)}
-                      disabled={n === forbiddenBet}
+                      disabled={isRestrictionActive && n === forbiddenBet}
                       className={`w-11 h-11 rounded-lg font-bold text-lg transition-all
                         ${
                           n === forbiddenBet
@@ -531,7 +552,7 @@ function GameContent() {
       )}
 
       {/* Painel fim de rodada */}
-      {roundEnd && (
+      {showRoundEndOverlay && roundEnd && (
         <div className="absolute inset-0 bg-black/75 flex items-center justify-center z-40 p-4">
           <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
             <h2 className="text-xl font-black text-yellow-400 text-center mb-4">
