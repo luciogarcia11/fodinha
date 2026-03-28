@@ -101,15 +101,15 @@ function GameContent() {
     (a, b) => a + b,
     0,
   );
-  const forbiddenBet = isLastBetter
-    ? gameState.cardsThisRound - currentBetSum
-    : -1;
+  const forbiddenBet =
+    isLastBetter && gameState.cardsThisRound > 1
+      ? gameState.cardsThisRound - currentBetSum
+      : -1;
 
   // Pé da rodada
   const dealerPlayer =
     activePlayers[gameState.dealerIndex % activePlayers.length];
 
-  
   function handleCardClick(idx: number) {
     if (!gameState || !isMyTurn || gameState.phase !== "playing") return;
     if (selectedCard === idx) {
@@ -262,6 +262,7 @@ function GameContent() {
                   Quantas vazas você vai fazer?
                 </p>
                 {isLastBetter &&
+                  gameState.cardsThisRound > 1 &&
                   forbiddenBet >= 0 &&
                   forbiddenBet <= gameState.cardsThisRound && (
                     <p className="text-red-400 text-xs mb-2">
@@ -277,10 +278,12 @@ function GameContent() {
                     <button
                       key={n}
                       onClick={() => placeBet(n)}
-                      disabled={n === forbiddenBet}
+                      disabled={
+                        gameState.cardsThisRound > 1 && n === forbiddenBet
+                      }
                       className={`w-11 h-11 rounded-lg font-bold text-lg transition-all
                         ${
-                          n === forbiddenBet
+                          gameState.cardsThisRound > 1 && n === forbiddenBet
                             ? "bg-white/10 text-white/20 cursor-not-allowed line-through"
                             : "bg-yellow-400 hover:bg-yellow-300 text-gray-900 active:scale-95"
                         }`}
