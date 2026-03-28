@@ -155,12 +155,17 @@ io.on("connection", (socket) => {
               state.players = updatedPlayers;
               state.phase = "round_end";
 
+              // Força novo array para garantir re-render nos clientes
+              state.players = [...state.players];
+
               io.to(roomId).emit("game:roundEnd", {
                 bets: state.bets,
                 tricksTaken: state.tricksTaken,
                 eliminated,
                 players: state.players,
               });
+
+              io.to(roomId).emit('game:stateUpdate', state);
 
               const gameWinner = checkGameOver(state.players);
               if (gameWinner !== null) {

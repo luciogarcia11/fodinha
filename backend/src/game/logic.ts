@@ -82,12 +82,11 @@ export function applyRoundResult(
   const eliminated: string[] = [];
 
   const updatedPlayers = players.map(p => {
-    if (p.isEliminated) return p;
+    if (p.isEliminated) return { ...p };
 
     const bet = bets[p.id] ?? 0;
     const taken = tricksTaken[p.id] ?? 0;
     const lostLife = bet !== taken;
-
     const newLives = lostLife ? p.lives - 1 : p.lives;
     const isEliminated = newLives <= 0;
 
