@@ -20,7 +20,6 @@ function GameContent() {
     trickResult,
     roundEnd,
     winnerId,
-    clearRoundEnd,
     quitGame,
   } = useGameContext();
 
@@ -37,6 +36,7 @@ function GameContent() {
       : null;
   const [showRules, setShowRules] = useState(false);
   const [showQuit, setShowQuit] = useState(false);
+  const [showTrickResult, setShowTrickResult] = useState(false);
 
   useEffect(() => {
     if (!gameState) return;
@@ -44,12 +44,14 @@ function GameContent() {
   }, [gameState, roomCode, router]);
 
   useEffect(() => {
-    if (!roundEnd) return;
+    if (!trickResult) return;
     const t = setTimeout(() => {
-      clearRoundEnd();
-    }, 4000);
+      // trickResult some sozinho quando o próximo stateUpdate chegar
+      // mas forçamos via state local para sumir visualmente
+      setShowTrickResult(false);
+    }, 2000);
     return () => clearTimeout(t);
-  }, [roundEnd, clearRoundEnd]);
+  }, [trickResult]);
 
   if (!gameState) {
     return (
@@ -239,8 +241,8 @@ function GameContent() {
         </div>
 
         {/* Resultado da vaza */}
-        {trickResult && (
-          <div className="bg-black/80 border border-yellow-400/30 rounded-2xl px-8 py-4 text-center animate-bounce">
+        {showTrickResult && trickResult && (
+          <div className="bg-black/80 border border-yellow-400/30 rounded-2xl px-8 py-4 text-center">
             {trickResult.winnerId ? (
               <div className="flex flex-col items-center gap-1">
                 <span className="text-3xl">

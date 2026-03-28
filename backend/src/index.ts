@@ -122,9 +122,8 @@ io.on("connection", (socket) => {
         state.resolvingTrick = true;
         io.to(roomId).emit("game:stateUpdate", state);
 
+        // Após 2 segundos: mostra quem fez a vaza
         setTimeout(() => {
-          state.resolvingTrick = false;
-
           const winnerId = resolveVaza(
             state.currentTrick,
             state.config.fdpRule,
@@ -141,54 +140,59 @@ io.on("connection", (socket) => {
             winnerId,
           });
 
-          state.currentTrick = [];
-          state.trickNumber++;
+          // Após mais 2 segundos (total 4s): limpa mesa e avança
+          setTimeout(() => {
+            state.resolvingTrick = false;
+            state.currentTrick = [];
+            state.trickNumber++;
 
-          if (state.trickNumber > state.cardsThisRound) {
-            const { updatedPlayers, eliminated } = applyRoundResult(
-              state.players,
-              state.bets,
-              state.tricksTaken,
-            );
-            state.players = updatedPlayers;
-            state.phase = "round_end";
+            if (state.trickNumber > state.cardsThisRound) {
+              const { updatedPlayers, eliminated } = applyRoundResult(
+                state.players,
+                state.bets,
+                state.tricksTaken,
+              );
+              state.players = updatedPlayers;
+              state.phase = "round_end";
 
-            io.to(roomId).emit("game:roundEnd", {
-              bets: state.bets,
-              tricksTaken: state.tricksTaken,
-              eliminated,
-              players: state.players,
-            });
+              io.to(roomId).emit("game:roundEnd", {
+                bets: state.bets,
+                tricksTaken: state.tricksTaken,
+                eliminated,
+                players: state.players,
+              });
 
-            const gameWinner = checkGameOver(state.players);
-            if (gameWinner !== null) {
-              state.phase = "game_over";
-              io.to(roomId).emit("game:over", { winnerId: gameWinner });
+              const gameWinner = checkGameOver(state.players);
+              if (gameWinner !== null) {
+                state.phase = "game_over";
+                io.to(roomId).emit("game:over", { winnerId: gameWinner });
+              } else {
+                setTimeout(() => {
+                  state.round++;
+                  const activePlayers = state.players.filter(
+                    (p) => !p.isEliminated,
+                  );
+                  state.dealerIndex =
+                    (state.dealerIndex + 1) % activePlayers.length;
+
+                  const { cardsThisRound, ascending } = getCardsForRound(
+                    state.round,
+                    state.config.maxRounds,
+                  );
+                  state.cardsThisRound = cardsThisRound;
+                  state.ascending = ascending;
+
+                  dealRound(state);
+                  io.to(roomId).emit("game:stateUpdate", state);
+                }, 4000);
+              }
             } else {
-              setTimeout(() => {
-                state.round++;
-                const activePlayers = state.players.filter(
-                  (p) => !p.isEliminated,
-                );
-                state.dealerIndex =
-                  (state.dealerIndex + 1) % activePlayers.length;
-
-                const { cardsThisRound, ascending } = getCardsForRound(
-                  state.round,
-                  state.config.maxRounds,
-                );
-                state.cardsThisRound = cardsThisRound;
-                state.ascending = ascending;
-
-                dealRound(state);
-                io.to(roomId).emit("game:stateUpdate", state);
-              }, 4000);
+              // Próxima vaza
+              state.currentTurn = winnerId ?? state.trickLeader;
+              io.to(roomId).emit("game:stateUpdate", state);
             }
-          } else {
-            state.currentTurn = winnerId ?? state.trickLeader;
-            io.to(roomId).emit("game:stateUpdate", state);
-          }
-        }, 4000);
+          }, 2000);
+        }, 2000); // 2 segundos para mostrar resultado
       } else {
         const activeIds = activePlayers.map((p) => p.id);
         const currentIdx = activeIds.indexOf(socket.id);
@@ -197,49 +201,50 @@ io.on("connection", (socket) => {
       }
     },
   );
-  
-  socket.on('player:quit', ({ roomId }: { roomId: string }) => {
-  const state = getRoom(roomId);
-  if (!state) return;
 
-  disconnectPlayer(roomId, socket.id);
-  socket.leave(roomId);
+  socket.on("player:quit", ({ roomId }: { roomId: string }) => {
+    const state = getRoom(roomId);
+    if (!state) return;
 
-  const activePlayers = state.players.filter(p => !p.isEliminated);
+    disconnectPlayer(roomId, socket.id);
+    socket.leave(roomId);
 
-  // Se sobrou menos de 2 jogadores ativos, encerra a partida
-  if (activePlayers.length < 2) {
-    const lastPlayer = activePlayers[0];
-    state.phase = 'game_over';
-    io.to(roomId).emit('game:over', { winnerId: lastPlayer?.id ?? null });
-    return;
-  }
+    const activePlayers = state.players.filter((p) => !p.isEliminated);
 
-  // Se era a vez dele apostar, passa para o próximo
-  if (state.phase === 'betting' && state.currentTurn === socket.id) {
-    const idx = state.bettingOrder.indexOf(socket.id);
-    state.bettingOrder = state.bettingOrder.filter(id => id !== socket.id);
-    const nextIdx = idx % state.bettingOrder.length;
-    state.currentTurn = state.bettingOrder[nextIdx];
-  }
+    // Se sobrou menos de 2 jogadores ativos, encerra a partida
+    if (activePlayers.length < 2) {
+      const lastPlayer = activePlayers[0];
+      state.phase = "game_over";
+      io.to(roomId).emit("game:over", { winnerId: lastPlayer?.id ?? null });
+      return;
+    }
 
-  // Se era a vez dele jogar, passa para o próximo
-  if (state.phase === 'playing' && state.currentTurn === socket.id) {
-    const activeIds = activePlayers
-      .filter(p => p.id !== socket.id)
-      .map(p => p.id);
-    const currentIdx = activeIds.indexOf(socket.id);
-    state.currentTurn = activeIds[(currentIdx + 1) % activeIds.length];
-  }
+    // Se era a vez dele apostar, passa para o próximo
+    if (state.phase === "betting" && state.currentTurn === socket.id) {
+      const idx = state.bettingOrder.indexOf(socket.id);
+      state.bettingOrder = state.bettingOrder.filter((id) => id !== socket.id);
+      const nextIdx = idx % state.bettingOrder.length;
+      state.currentTurn = state.bettingOrder[nextIdx];
+    }
 
-  // Remove da ordem de apostas
-  state.bettingOrder = state.bettingOrder.filter(id => id !== socket.id);
+    // Se era a vez dele jogar, passa para o próximo
+    if (state.phase === "playing" && state.currentTurn === socket.id) {
+      const activeIds = activePlayers
+        .filter((p) => p.id !== socket.id)
+        .map((p) => p.id);
+      const currentIdx = activeIds.indexOf(socket.id);
+      state.currentTurn = activeIds[(currentIdx + 1) % activeIds.length];
+    }
 
-  io.to(roomId).emit('game:stateUpdate', state);
-  io.to(roomId).emit('game:playerQuit', {
-    playerName: state.players.find(p => p.id === socket.id)?.name ?? 'Jogador',
+    // Remove da ordem de apostas
+    state.bettingOrder = state.bettingOrder.filter((id) => id !== socket.id);
+
+    io.to(roomId).emit("game:stateUpdate", state);
+    io.to(roomId).emit("game:playerQuit", {
+      playerName:
+        state.players.find((p) => p.id === socket.id)?.name ?? "Jogador",
+    });
   });
-});
 
   socket.on("disconnect", () => {
     console.log(`❌ Desconectado: ${socket.id}`);
