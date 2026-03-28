@@ -21,6 +21,7 @@ function GameContent() {
     roundEnd,
     winnerId,
     clearRoundEnd,
+    quitGame,
   } = useGameContext();
 
   const router = useRouter();
@@ -68,7 +69,9 @@ function GameContent() {
           {winner?.id === myId ? "🎉 Você venceu!" : `${winner?.name} venceu!`}
         </p>
         <button
-          onClick={() => router.push("/")}
+          onClick={() =>
+            (window.location.href = "https://fodinhamineirafront.vercel.app/")
+          }
           className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 px-8 rounded-xl text-lg"
         >
           Voltar ao início
@@ -106,6 +109,7 @@ function GameContent() {
   const dealerPlayer =
     activePlayers[gameState.dealerIndex % activePlayers.length];
 
+  
   function handleCardClick(idx: number) {
     if (!gameState || !isMyTurn || gameState.phase !== "playing") return;
     if (selectedCard === idx) {
@@ -401,10 +405,13 @@ function GameContent() {
         </div>
 
         <button
-          onClick={() => setShowQuit(true)}
-          className="flex items-center gap-1 text-xs text-red-400/70 hover:text-red-400 transition-all bg-red-900/20 hover:bg-red-900/40 px-3 py-1.5 rounded-lg"
+          onClick={() => {
+            quitGame();
+            window.location.href = "https://fodinhamineirafront.vercel.app/";
+          }}
+          className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg"
         >
-          🚪 Sair
+          Sair
         </button>
       </div>
 

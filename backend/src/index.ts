@@ -77,7 +77,7 @@ io.on("connection", (socket) => {
       // Restrição do pé: a soma das apostas não pode ser igual ao número de vazas
       const isLast =
         state.bettingOrder.indexOf(socket.id) === state.bettingOrder.length - 1;
-      if (isLast) {
+      if (isLast && state.cardsThisRound > 1) {
         const forbidden = getForbiddenBet(state.bets, state.cardsThisRound);
         if (forbidden !== null && bet === forbidden) {
           socket.emit("room:error", {
@@ -197,6 +197,49 @@ io.on("connection", (socket) => {
       }
     },
   );
+  
+  socket.on('player:quit', ({ roomId }: { roomId: string }) => {
+  const state = getRoom(roomId);
+  if (!state) return;
+
+  disconnectPlayer(roomId, socket.id);
+  socket.leave(roomId);
+
+  const activePlayers = state.players.filter(p => !p.isEliminated);
+
+  // Se sobrou menos de 2 jogadores ativos, encerra a partida
+  if (activePlayers.length < 2) {
+    const lastPlayer = activePlayers[0];
+    state.phase = 'game_over';
+    io.to(roomId).emit('game:over', { winnerId: lastPlayer?.id ?? null });
+    return;
+  }
+
+  // Se era a vez dele apostar, passa para o próximo
+  if (state.phase === 'betting' && state.currentTurn === socket.id) {
+    const idx = state.bettingOrder.indexOf(socket.id);
+    state.bettingOrder = state.bettingOrder.filter(id => id !== socket.id);
+    const nextIdx = idx % state.bettingOrder.length;
+    state.currentTurn = state.bettingOrder[nextIdx];
+  }
+
+  // Se era a vez dele jogar, passa para o próximo
+  if (state.phase === 'playing' && state.currentTurn === socket.id) {
+    const activeIds = activePlayers
+      .filter(p => p.id !== socket.id)
+      .map(p => p.id);
+    const currentIdx = activeIds.indexOf(socket.id);
+    state.currentTurn = activeIds[(currentIdx + 1) % activeIds.length];
+  }
+
+  // Remove da ordem de apostas
+  state.bettingOrder = state.bettingOrder.filter(id => id !== socket.id);
+
+  io.to(roomId).emit('game:stateUpdate', state);
+  io.to(roomId).emit('game:playerQuit', {
+    playerName: state.players.find(p => p.id === socket.id)?.name ?? 'Jogador',
+  });
+});
 
   socket.on("disconnect", () => {
     console.log(`❌ Desconectado: ${socket.id}`);
