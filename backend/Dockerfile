@@ -29,10 +29,12 @@ RUN npm install --omit=dev
 # Copia os arquivos gerados no estágio anterior
 COPY --from=builder /app/dist ./dist
 
+# Criar diretório de dados para persistência do SQLite
+RUN mkdir -p /app/data
+
 EXPOSE 3001
 
 # Definir volume persistente caso queira usar um banco SQLite3 no servidor físico e não perdê-lo
-# A documentação aconselhará a hospedar num path com volume docker no ./data
 ENV NODE_ENV=production
 ENV PORT=3001
 
