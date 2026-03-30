@@ -3,23 +3,49 @@
 import { useState, useEffect } from 'react';
 import { useGameContext } from '@/lib/gameContext';
 import { useRouter } from 'next/navigation';
+import Chat from '@/components/Chat';
 
 export default function Home() {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [mode, setMode] = useState<'none' | 'create' | 'join'>('none');
-  const { createRoom, joinRoom, roomId, error, clearError } = useGameContext();
+  const [nameError, setNameError] = useState('');
+  const { createRoom, joinRoom, roomId, gameState, error, clearError, kicked, globalChatMessages, sendGlobalChat } = useGameContext();
   const router = useRouter();
 
   useEffect(() => {
-    if (roomId) {
-      router.push(`/lobby?room=${roomId}`);
+    if (roomId && gameState) {
+      if (gameState.phase === 'lobby') {
+        router.push(`/lobby?room=${roomId}`);
+      } else {
+        router.push(`/game?room=${roomId}`);
+      }
     }
-  }, [roomId, router]);
+  }, [roomId, gameState, router]);
 
   useEffect(() => {
     clearError();
+    setNameError('');
   }, [mode]);
+
+  function handleCreate() {
+    if (!name.trim()) {
+      setNameError('Nome é obrigatório!');
+      return;
+    }
+    setNameError('');
+    createRoom(name.trim());
+  }
+
+  function handleJoin() {
+    if (!name.trim()) {
+      setNameError('Nome é obrigatório!');
+      return;
+    }
+    if (!code.trim()) return;
+    setNameError('');
+    joinRoom(code, name.trim());
+  }
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center gap-8 p-4">
@@ -30,9 +56,15 @@ export default function Home() {
         <p className="text-green-300 mt-2 text-lg">Jogo de cartas multiplayer</p>
       </div>
 
-      {error && (
+      {(error || nameError) && (
         <div className="bg-red-600 text-white px-4 py-2 rounded-lg">
-          {error}
+          {nameError || error}
+        </div>
+      )}
+
+      {kicked && (
+        <div className="bg-red-600 text-white px-4 py-2 rounded-lg">
+          {kicked}
         </div>
       )}
 
@@ -50,6 +82,23 @@ export default function Home() {
           >
             Entrar na Sala
           </button>
+          <button
+            onClick={() => router.push('/rooms')}
+            className="bg-green-600/80 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-xl text-lg transition-all border border-green-500/50"
+          >
+            🔍 Salas Públicas
+          </button>
+        </div>
+      )}
+
+      {/* Chat global na página inicial */}
+      {mode === 'none' && globalChatMessages && (
+        <div className="fixed right-4 bottom-6 z-40">
+          <Chat
+            messages={globalChatMessages}
+            send={sendGlobalChat}
+            global
+          />
         </div>
       )}
 
@@ -61,13 +110,13 @@ export default function Home() {
             placeholder="Seu nome"
             value={name}
             onChange={e => setName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && name.trim() && createRoom(name.trim())}
-            className="bg-white/20 text-white placeholder-white/50 px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400"
+            onKeyDown={e => e.key === 'Enter' && handleCreate()}
+            className="bg-white/20 text-white placeholder-white/50 px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400 text-center"
             maxLength={16}
             autoFocus
           />
           <button
-            onClick={() => name.trim() && createRoom(name.trim())}
+            onClick={handleCreate}
             className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 rounded-lg transition-all"
           >
             Criar
@@ -86,7 +135,7 @@ export default function Home() {
             placeholder="Seu nome"
             value={name}
             onChange={e => setName(e.target.value)}
-            className="bg-white/20 text-white placeholder-white/50 px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400"
+            className="bg-white/20 text-white placeholder-white/50 px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400 text-center"
             maxLength={16}
             autoFocus
           />
@@ -95,12 +144,12 @@ export default function Home() {
             placeholder="Código da sala"
             value={code}
             onChange={e => setCode(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && name.trim() && code.trim() && joinRoom(code, name.trim())}
+            onKeyDown={e => e.key === 'Enter' && handleJoin()}
             className="bg-white/20 text-white placeholder-white/50 px-4 py-3 rounded-lg outline-none focus:ring-2 focus:ring-yellow-400 tracking-widest font-mono text-center"
             maxLength={5}
           />
           <button
-            onClick={() => name.trim() && code.trim() && joinRoom(code, name.trim())}
+            onClick={handleJoin}
             className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 rounded-lg transition-all"
           >
             Entrar

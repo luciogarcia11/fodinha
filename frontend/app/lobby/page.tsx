@@ -2,11 +2,12 @@
 
 import { useEffect } from "react";
 import { useGameContext } from "@/lib/gameContext";
+import Chat from "@/components/Chat";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 function LobbyContent() {
-  const { gameState, myId, startGame, updateConfig, roomId } = useGameContext();
+  const { gameState, myId, startGame, updateConfig, roomId, chatMessages, sendChat, globalChatMessages, sendGlobalChat } = useGameContext();
   const router = useRouter();
   const searchParams = useSearchParams();
   const roomCode = searchParams.get("room") ?? roomId;
@@ -132,7 +133,53 @@ function LobbyContent() {
               </span>
             )}
           </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm">Desempate por Naipe</span>
+            {isHost ? (
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-yellow-400"
+                checked={gameState.config.suitTiebreakerRule}
+                onChange={(e) =>
+                  updateConfig({ suitTiebreakerRule: e.target.checked })
+                }
+              />
+            ) : (
+              <span
+                className={`text-sm font-bold ${gameState.config.suitTiebreakerRule ? "text-green-400" : "text-white/40"}`}
+              >
+                {gameState.config.suitTiebreakerRule ? "✓ Ativa" : "✗ Inativa"}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm">Sala Pública</span>
+            {isHost ? (
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-yellow-400"
+                checked={gameState.config.isPublic}
+                onChange={(e) => updateConfig({ isPublic: e.target.checked })}
+              />
+            ) : (
+              <span className={`text-sm font-bold ${gameState.config.isPublic ? "text-green-400" : "text-white/40"}`}>
+                {gameState.config.isPublic ? "✓ Pública" : "✗ Privada"}
+              </span>
+            )}
+          </div>
         </div>
+      </div>
+
+      {/* Chat in lobby - usa chat global se sala pública, chat da sala se privada */}
+      <div className="fixed right-4 bottom-6 z-40">
+        <Chat
+          messages={gameState.config.isPublic && globalChatMessages ? globalChatMessages : chatMessages}
+          send={gameState.config.isPublic ? sendGlobalChat : sendChat}
+          compact
+          global={gameState.config.isPublic}
+        />
       </div>
 
       {isHost && (
