@@ -6,6 +6,7 @@ export interface Card {
   suit: Suit;
   isManilha: boolean;
   strength: number;
+  deckColor?: 'blue' | 'red';
 }
 
 export interface PlayedCard {
@@ -21,13 +22,38 @@ export interface Player {
   hand: Card[];
   connected: boolean;
   isEliminated: boolean;
+  sessionId: string;
 }
 
 export interface GameConfig {
   livesPerPlayer: number;
   fdpRule: boolean;
   cardOnForeheadRule: boolean;
+  suitTiebreakerRule: boolean;
   maxRounds: number;
+  isPublic: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  roomId?: string;
+  playerId: string;
+  playerName: string;
+  text: string;
+  timestamp?: number;
+  createdAt?: number;
+}
+
+export interface TrickState {
+  winningCardPlayerId: string | null;
+  isTied: boolean;
+  lastStrongCardPlayerId: string | null;
+}
+
+export interface VoteKick {
+  targetId: string;
+  votes: string[];
+  startTime: number;
 }
 
 export type GamePhase =
@@ -54,6 +80,9 @@ export interface GameState {
   trickNumber: number;
   dealerIndex: number;
   config: GameConfig;
+  trickState: TrickState | null;
+  activeVoteKick: VoteKick | null;
+  bannedIds: string[];
 }
 
 export interface TrickResult {
@@ -66,4 +95,32 @@ export interface RoundEndData {
   tricksTaken: Record<string, number>;
   eliminated: string[];
   players: Player[];
+}
+
+export interface VoteStartedData {
+  targetId: string;
+  targetName: string;
+  initiatorName: string;
+  votes: number;
+  needed: number;
+}
+
+export interface VoteUpdateData {
+  votes: number;
+  needed: number;
+}
+
+export interface PublicRoomInfo {
+  roomId: string;
+  hostName: string;
+  playerCount: number;
+  maxPlayers: number;
+  config: GameConfig;
+}
+
+export interface Reaction {
+  playerId: string;
+  playerName: string;
+  emoji: string;
+  timestamp: number;
 }

@@ -6,6 +6,7 @@ export interface Card {
   suit: Suit;
   isManilha: boolean;
   strength: number;
+  deckColor?: 'blue' | 'red';
 }
 
 export interface PlayedCard {
@@ -21,13 +22,36 @@ export interface Player {
   hand: Card[];
   connected: boolean;
   isEliminated: boolean;
+  sessionId: string;
 }
 
 export interface GameConfig {
   livesPerPlayer: number;
   fdpRule: boolean;
   cardOnForeheadRule: boolean;
+  suitTiebreakerRule: boolean;
   maxRounds: number;
+  isPublic: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  playerId: string;
+  playerName: string;
+  text: string;
+  timestamp: number;
+}
+
+export interface TrickState {
+  winningCardPlayerId: string | null;
+  isTied: boolean;
+  lastStrongCardPlayerId: string | null;
+}
+
+export interface VoteKick {
+  targetId: string;
+  votes: string[];
+  startTime: number;
 }
 
 export type GamePhase =
@@ -53,6 +77,10 @@ export interface GameState {
   trickLeader: string;
   trickNumber: number;
   dealerIndex: number;
-  resolvingTrick: boolean; // 👈 novo campo
+  resolvingTrick: boolean;
   config: GameConfig;
+  trickState: TrickState | null;
+  activeVoteKick: VoteKick | null;
+  bannedIds: string[];
+  chatMessages: ChatMessage[];
 }
