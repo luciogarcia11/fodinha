@@ -53,6 +53,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
   const state: GameState = {
     roomId,
     hostId,
+    hostName,
     phase: 'lobby',
     round: 1,
     cardsThisRound: 1,

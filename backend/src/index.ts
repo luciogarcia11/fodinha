@@ -33,7 +33,7 @@ import {
   getGlobalChatMessages,
   addGlobalChatMessage,
 } from "./db/schema";
-import { getRoomReactions } from "./db/rooms";
+import { getRoomReactions, checkRateLimit } from "./db/rooms";
 import {
   validatePlayerName,
   validateRoomCode,
@@ -679,6 +679,29 @@ io.on("connection", (socket) => {
     if (message) {
       io.to(roomId).emit("chat:message", message);
     }
+  });
+
+  // ===== GLOBAL CHAT:SEND =====
+  socket.on("global:chat", ({ text }: { text: string }) => {
+    // Basic sanitization
+    const sanitized = text
+      .replace(/[<>]/g, c => ({ '<': '&lt;', '>': '&gt;' }[c] ?? c))
+      .trim()
+      .slice(0, 200);
+
+    if (!sanitized) return;
+
+    // Random generic name since they might not be in a room yet
+    const shortId = socket.id.substring(0, 4);
+    const playerName = `Visitante-${shortId}`;
+    
+    // Check rate limit using socket.id as playerId, and undefined as roomId
+    if (!checkRateLimit(socket.id, undefined, 'global_chat', 5, 30)) {
+       return; // Limit exceeded
+    }
+
+    const message = addGlobalChatMessage(socket.id, playerName, sanitized);
+    io.emit('global:chat', message);
   });
 
   // ===== REACTION:SEND =====

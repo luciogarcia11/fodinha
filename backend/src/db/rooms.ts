@@ -16,15 +16,16 @@ export function generateSessionId(): string {
 export function saveRoom(state: GameState): void {
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO rooms (
-      id, host_id, phase, round, cards_this_round, ascending,
+      id, host_id, host_name, phase, round, cards_this_round, ascending,
       current_turn, trick_leader, trick_number, dealer_index,
       resolving_trick, is_public, last_activity
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
     state.roomId,
     state.hostId,
+    state.hostName,
     state.phase,
     state.round,
     state.cardsThisRound,
@@ -126,6 +127,7 @@ export function loadRoom(roomId: string): GameState | null {
   return {
     roomId: room.id,
     hostId: room.host_id,
+    hostName: room.host_name,
     phase: room.phase,
     round: room.round,
     cardsThisRound: room.cards_this_round,

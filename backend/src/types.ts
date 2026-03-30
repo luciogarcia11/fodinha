@@ -66,6 +66,7 @@ export type GamePhase =
 export interface GameState {
   roomId: string;
   hostId: string;
+  hostName: string;
   phase: GamePhase;
   round: number;
   cardsThisRound: number;
