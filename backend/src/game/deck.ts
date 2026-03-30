@@ -25,7 +25,15 @@ const COMMON_STRENGTH: Record<CardValue, number> = {
   '4': 1,
 };
 
-export function buildDeck(): Card[] {
+// Força dos naipes para desempate (maior = mais forte)
+export const SUIT_STRENGTH: Record<Suit, number> = {
+  'clubs':    4,
+  'hearts':   3,
+  'spades':   2,
+  'diamonds': 1,
+};
+
+export function buildDeck(deckColor: 'blue' | 'red' = 'blue'): Card[] {
   const deck: Card[] = [];
 
   for (const suit of SUITS) {
@@ -34,7 +42,7 @@ export function buildDeck(): Card[] {
       const isManilha = key in MANILHAS;
       const strength = isManilha ? MANILHAS[key] : COMMON_STRENGTH[value];
 
-      deck.push({ value, suit, isManilha, strength });
+      deck.push({ value, suit, isManilha, strength, deckColor });
     }
   }
 
@@ -59,4 +67,15 @@ export function dealCards(deck: Card[], playerCount: number, cardsPerPlayer: num
     }
   }
   return hands;
+}
+
+/**
+ * Cria múltiplos baralhos para a regra FDP.
+ * A regra FDP usa sempre exatamente 2 baralhos: um azul e um vermelho.
+ */
+export function buildMultiDeck(): Card[] {
+  return [
+    ...buildDeck('blue'),
+    ...buildDeck('red')
+  ];
 }

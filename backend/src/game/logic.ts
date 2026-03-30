@@ -1,41 +1,229 @@
-import { GameState, PlayedCard, Player } from '../types';
+import { GameState, PlayedCard, Player, TrickState } from '../types';
+import { SUIT_STRENGTH } from './deck';
 
 /**
  * Resolve quem venceu a vaza.
  * Retorna o playerId do vencedor ou null se ninguém ganhou.
+ *
+ * Sem FDP: carta mais forte vence. Empate de strength → desempate por naipe (se ativo) ou null.
+ * Com FDP: amarração — cartas processadas em ordem de jogo.
+ *   Cartas de mesmo valor (e mesmo naipe se suitTiebreaker ativo) se anulam.
+ *   Quando há amarração, volta a valer a maior carta anterior não anulada.
  */
 export function resolveVaza(
   trick: PlayedCard[],
-  fdpRule: boolean
+  fdpRule: boolean,
+  suitTiebreakerRule: boolean = false
 ): string | null {
-  let candidates = [...trick];
+  if (trick.length === 0) return null;
 
   if (fdpRule) {
-    // Separa manilhas e comuns
-    const manilhas = candidates.filter(p => p.card.isManilha);
-    const comuns = candidates.filter(p => !p.card.isManilha);
-
-    // Anula comuns de mesmo valor
-    const valueCounts: Record<string, number> = {};
-    for (const p of comuns) {
-      valueCounts[p.card.value] = (valueCounts[p.card.value] ?? 0) + 1;
-    }
-    const comunsRestantes = comuns.filter(p => valueCounts[p.card.value] === 1);
-
-    // Candidatos finais: manilhas + comuns não anuladas
-    candidates = [...manilhas, ...comunsRestantes];
-
-    if (candidates.length === 0) return null;
+    return resolveVazaFDP(trick, suitTiebreakerRule);
   }
 
-  // Encontra a maior força
-  const maxStrength = Math.max(...candidates.map(p => p.card.strength));
-  const winners = candidates.filter(p => p.card.strength === maxStrength);
+  return resolveVazaStandard(trick, suitTiebreakerRule);
+}
 
-  // Empate entre os mais fortes → sem vencedor
-  if (winners.length > 1) return null;
+function resolveVazaStandard(trick: PlayedCard[], suitTiebreakerRule: boolean): string | null {
+  const maxStrength = Math.max(...trick.map(p => p.card.strength));
+  const winners = trick.filter(p => p.card.strength === maxStrength);
 
-  return winners[0].playerId;
+  if (winners.length === 1) return winners[0].playerId;
+
+  // Empate de strength
+  if (suitTiebreakerRule) {
+    // Desempate por naipe — maior naipe vence
+    const maxSuit = Math.max(...winners.map(p => SUIT_STRENGTH[p.card.suit]));
+    const suitWinners = winners.filter(p => SUIT_STRENGTH[p.card.suit] === maxSuit);
+    if (suitWinners.length === 1) return suitWinners[0].playerId;
+  }
+
+  return null;
+}
+
+/**
+ * Resolve vaza no modo FDP com amarração.
+ * Processa cartas na ordem em que foram jogadas.
+ * Cartas iguais se anulam (amarram), voltando a valer a maior anterior.
+ */
+function resolveVazaFDP(trick: PlayedCard[], suitTiebreakerRule: boolean): string | null {
+  // Stack de cartas "vivas" — quando uma carta amarra com a atual vencedora,
+  // ambas são removidas e a anterior volta a valer.
+  // Cada entrada: { playerId, card, strength_effective }
+  interface LiveCard {
+    playerId: string;
+    card: typeof trick[0]['card'];
+  }
+
+  const liveCards: LiveCard[] = [];
+
+  for (const played of trick) {
+    const { card } = played;
+
+    // Verifica se essa carta amarra com alguma carta viva
+    const matchIndex = liveCards.findIndex(lc => cardsMatch(lc.card, card, suitTiebreakerRule));
+
+    if (matchIndex !== -1) {
+      // Amarração! Remove a carta que amarrou
+      liveCards.splice(matchIndex, 1);
+      // A carta atual também é anulada (não entra no liveCards)
+    } else {
+      liveCards.push({ playerId: played.playerId, card });
+    }
+  }
+
+  if (liveCards.length === 0) return null;
+
+  // Encontra a carta mais forte entre as sobreviventes
+  const maxStrength = Math.max(...liveCards.map(lc => lc.card.strength));
+  const winners = liveCards.filter(lc => lc.card.strength === maxStrength);
+
+  if (winners.length === 1) return winners[0].playerId;
+
+  // Empate entre sobreviventes — desempate por naipe
+  if (suitTiebreakerRule) {
+    const maxSuit = Math.max(...winners.map(lc => SUIT_STRENGTH[lc.card.suit]));
+    const suitWinners = winners.filter(lc => SUIT_STRENGTH[lc.card.suit] === maxSuit);
+    if (suitWinners.length === 1) return suitWinners[0].playerId;
+  }
+
+  return null;
+}
+
+/**
+ * Verifica se duas cartas "amarram" (se anulam).
+ * FDP sem suit tiebreaker: mesmo valor entre comuns (manilhas nunca amarram)
+ * FDP com suit tiebreaker: mesmo valor E mesmo naipe (cartas idênticas)
+ */
+function cardsMatch(
+  a: { value: string; suit: string; isManilha: boolean; strength: number },
+  b: { value: string; suit: string; isManilha: boolean; strength: number },
+  suitTiebreakerRule: boolean
+): boolean {
+  // Manilhas nunca se anulam entre si
+  if (a.isManilha || b.isManilha) return false;
+
+  if (suitTiebreakerRule) {
+    // Com desempate por naipe, só amarra se for carta idêntica (mesmo valor E naipe)
+    return a.value === b.value && a.suit === b.suit;
+  }
+
+  // Sem desempate por naipe, amarra se mesmo valor
+  return a.value === b.value;
+}
+
+/**
+ * Calcula o estado atual da vaza em andamento (para visualização).
+ * Retorna quem está vencendo, se há empate, e a última carta forte.
+ */
+export function calculateTrickState(
+  trick: PlayedCard[],
+  fdpRule: boolean,
+  suitTiebreakerRule: boolean
+): TrickState {
+  if (trick.length === 0) {
+    return { winningCardPlayerId: null, isTied: false, lastStrongCardPlayerId: null };
+  }
+
+  if (trick.length === 1) {
+    return {
+      winningCardPlayerId: trick[0].playerId,
+      isTied: false,
+      lastStrongCardPlayerId: trick[0].playerId,
+    };
+  }
+
+  if (fdpRule) {
+    return calculateTrickStateFDP(trick, suitTiebreakerRule);
+  }
+
+  return calculateTrickStateStandard(trick, suitTiebreakerRule);
+}
+
+function calculateTrickStateStandard(trick: PlayedCard[], suitTiebreakerRule: boolean): TrickState {
+  const maxStrength = Math.max(...trick.map(p => p.card.strength));
+  const winners = trick.filter(p => p.card.strength === maxStrength);
+
+  if (winners.length === 1) {
+    return {
+      winningCardPlayerId: winners[0].playerId,
+      isTied: false,
+      lastStrongCardPlayerId: winners[0].playerId,
+    };
+  }
+
+  // Empate
+  if (suitTiebreakerRule) {
+    const maxSuit = Math.max(...winners.map(p => SUIT_STRENGTH[p.card.suit]));
+    const suitWinners = winners.filter(p => SUIT_STRENGTH[p.card.suit] === maxSuit);
+    if (suitWinners.length === 1) {
+      return {
+        winningCardPlayerId: suitWinners[0].playerId,
+        isTied: false,
+        lastStrongCardPlayerId: suitWinners[0].playerId,
+      };
+    }
+  }
+
+  return {
+    winningCardPlayerId: null,
+    isTied: true,
+    lastStrongCardPlayerId: null,
+  };
+}
+
+function calculateTrickStateFDP(trick: PlayedCard[], suitTiebreakerRule: boolean): TrickState {
+  interface LiveCard {
+    playerId: string;
+    card: typeof trick[0]['card'];
+  }
+
+  const liveCards: LiveCard[] = [];
+  let lastStrongPlayerId: string | null = null;
+
+  for (const played of trick) {
+    const { card } = played;
+    const matchIndex = liveCards.findIndex(lc => cardsMatch(lc.card, card, suitTiebreakerRule));
+
+    if (matchIndex !== -1) {
+      liveCards.splice(matchIndex, 1);
+    } else {
+      liveCards.push({ playerId: played.playerId, card });
+    }
+  }
+
+  if (liveCards.length === 0) {
+    return { winningCardPlayerId: null, isTied: true, lastStrongCardPlayerId: null };
+  }
+
+  const maxStrength = Math.max(...liveCards.map(lc => lc.card.strength));
+  const winners = liveCards.filter(lc => lc.card.strength === maxStrength);
+
+  if (winners.length === 1) {
+    return {
+      winningCardPlayerId: winners[0].playerId,
+      isTied: false,
+      lastStrongCardPlayerId: winners[0].playerId,
+    };
+  }
+
+  if (suitTiebreakerRule) {
+    const maxSuit = Math.max(...winners.map(lc => SUIT_STRENGTH[lc.card.suit]));
+    const suitWinners = winners.filter(lc => SUIT_STRENGTH[lc.card.suit] === maxSuit);
+    if (suitWinners.length === 1) {
+      return {
+        winningCardPlayerId: suitWinners[0].playerId,
+        isTied: false,
+        lastStrongCardPlayerId: suitWinners[0].playerId,
+      };
+    }
+  }
+
+  return {
+    winningCardPlayerId: null,
+    isTied: true,
+    lastStrongCardPlayerId: liveCards.length > 0 ? liveCards[0].playerId : null,
+  };
 }
 
 /**
