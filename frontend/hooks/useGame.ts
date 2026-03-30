@@ -2,7 +2,37 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { socket } from "@/lib/socket";
-import { GameState, TrickResult, RoundEndData } from "@/lib/types";
+import { GameState, TrickResult, RoundEndData, VoteStartedData, VoteUpdateData, ChatMessage, PublicRoomInfo, Reaction } from "@/lib/types";
+
+const SESSION_KEY = "fodinha_session";
+
+interface SessionData {
+  roomId: string;
+  sessionId: string;
+  playerName: string;
+}
+
+function saveSession(data: SessionData) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+  } catch {}
+}
+
+function loadSession(): SessionData | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function clearSession() {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {}
+}
 
 export function useGame() {
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -12,25 +42,70 @@ export function useGame() {
   const [roundEnd, setRoundEnd] = useState<RoundEndData | null>(null);
   const [winnerId, setWinnerId] = useState<string | null>(null);
   const [error, setError] = useState<string>("");
+  const [playerQuitName, setPlayerQuitName] = useState<string | null>(null);
+  const [playerReconnectedName, setPlayerReconnectedName] = useState<string | null>(null);
+  const [playerDisconnectedName, setPlayerDisconnectedName] = useState<string | null>(null);
+  const [kicked, setKicked] = useState<string | null>(null);
+  const [voteKick, setVoteKick] = useState<VoteStartedData | null>(null);
+  const [voteUpdate, setVoteUpdate] = useState<VoteUpdateData | null>(null);
+  const [voteComplete, setVoteComplete] = useState<{ targetName: string } | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [globalChatMessages, setGlobalChatMessages] = useState<any[]>([]);
+  const [reactions, setReactions] = useState<Reaction[]>([]);
+  const [publicRooms, setPublicRooms] = useState<PublicRoomInfo[]>([]);
 
   useEffect(() => {
     socket.connect();
 
     socket.on("connect", () => {
       setMyId(socket.id ?? "");
+
+      // Tentar reconnect com sessão salva
+      const session = loadSession();
+      if (session) {
+        socket.emit("room:rejoin", {
+          roomId: session.roomId,
+          sessionId: session.sessionId,
+        });
+      }
     });
 
     socket.on(
       "room:created",
-      ({ roomId, state }: { roomId: string; state: GameState }) => {
+      ({ roomId, state, sessionId }: { roomId: string; state: GameState; sessionId?: string }) => {
         setRoomId(roomId);
         setGameState(state);
+        if (sessionId) {
+          const me = state.players.find(p => p.id === socket.id);
+          saveSession({ roomId, sessionId, playerName: me?.name ?? "" });
+        }
       },
     );
+
+    socket.on("room:sessionInfo", ({ sessionId }: { sessionId?: string }) => {
+      if (sessionId) {
+        const session = loadSession();
+        // Atualiza sessionId mantendo roomId
+        saveSession({
+          roomId: session?.roomId ?? "",
+          sessionId,
+          playerName: session?.playerName ?? "",
+        });
+      }
+    });
+
+    socket.on("room:rejoinFailed", () => {
+      clearSession();
+    });
 
     socket.on("game:stateUpdate", (state: GameState) => {
       setGameState(state);
       setTrickResult(null);
+
+      // Atualiza roomId se necessário (para reconnect)
+      if (state.roomId && state.roomId !== roomId) {
+        setRoomId(state.roomId);
+      }
     });
 
     socket.on("game:trickResult", (result: TrickResult) => {
@@ -43,6 +118,7 @@ export function useGame() {
 
     socket.on("game:over", ({ winnerId }: { winnerId: string }) => {
       setWinnerId(winnerId);
+      clearSession();
     });
 
     socket.on("room:error", ({ message }: { message: string }) => {
@@ -50,28 +126,117 @@ export function useGame() {
     });
 
     socket.on("game:playerQuit", ({ playerName }: { playerName: string }) => {
-      console.log(`${playerName} saiu da partida`);
+      setPlayerQuitName(playerName);
+    });
+
+    socket.on("game:playerDisconnected", ({ playerName }: { playerName: string }) => {
+      setPlayerDisconnectedName(playerName);
+    });
+
+    socket.on("game:playerReconnected", ({ playerName }: { playerName: string }) => {
+      setPlayerReconnectedName(playerName);
+    });
+
+    socket.on("game:kicked", ({ message }: { message: string }) => {
+      setKicked(message);
+      clearSession();
+    });
+
+    // Vote-kick events
+    socket.on("vote:started", (data: VoteStartedData) => {
+      setVoteKick(data);
+      setVoteUpdate({ votes: data.votes, needed: data.needed });
+    });
+
+    socket.on("vote:update", (data: VoteUpdateData) => {
+      setVoteUpdate(data);
+    });
+
+    socket.on("vote:kickComplete", ({ targetName }: { targetName: string }) => {
+      setVoteComplete({ targetName });
+      setVoteKick(null);
+      setVoteUpdate(null);
+    });
+
+    socket.on("vote:expired", () => {
+      setVoteKick(null);
+      setVoteUpdate(null);
+    });
+
+    socket.on("chat:message", (message: ChatMessage) => {
+      setChatMessages(prev => {
+        const next = [...prev, message];
+        return next.length > 100 ? next.slice(-100) : next;
+      });
+    });
+
+    socket.on("room:list", (rooms: PublicRoomInfo[]) => {
+      setPublicRooms(rooms);
+    });
+
+    socket.on("global:chat", (message: any) => {
+      setGlobalChatMessages(prev => {
+        const next = [...prev, message];
+        return next.length > 50 ? next.slice(-50) : next;
+      });
+    });
+
+    socket.on("reaction:new", (reaction: Reaction) => {
+      setReactions(prev => [...prev, reaction]);
+      setTimeout(() => {
+        setReactions(prev => prev.filter(r => r !== reaction));
+      }, 3000); // Remove after 3 seconds
     });
 
     return () => {
       socket.off("connect");
       socket.off("room:created");
+      socket.off("room:sessionInfo");
+      socket.off("room:rejoinFailed");
       socket.off("game:stateUpdate");
       socket.off("game:trickResult");
       socket.off("game:roundEnd");
       socket.off("game:over");
       socket.off("room:error");
       socket.off("game:playerQuit");
+      socket.off("game:playerDisconnected");
+      socket.off("game:playerReconnected");
+      socket.off("game:kicked");
+      socket.off("vote:started");
+      socket.off("vote:update");
+      socket.off("vote:kickComplete");
+      socket.off("vote:expired");
+      socket.off("chat:message");
+      socket.off("room:list");
+      socket.off("global:chat");
+      socket.off("reaction:new");
     };
   }, []);
+
+  // Attempt to notify server on tab/window close so the room updates immediately.
+  useEffect(() => {
+    function handleBeforeUnload() {
+      if (roomId) {
+        try {
+          socket.emit("player:quit", { roomId });
+        } catch {}
+      }
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [roomId]);
 
   const createRoom = useCallback((name: string) => {
     socket.emit("room:create", { name });
   }, []);
 
   const joinRoom = useCallback((code: string, name: string) => {
-    socket.emit("room:join", { roomId: code.toUpperCase(), name });
-    setRoomId(code.toUpperCase());
+    const rid = code.toUpperCase();
+    socket.emit("room:join", { roomId: rid, name });
+    setRoomId(rid);
+    // Session será salvo quando recebermos room:sessionInfo
+    const session = loadSession();
+    saveSession({ roomId: rid, sessionId: session?.sessionId ?? "", playerName: name });
   }, []);
 
   const startGame = useCallback(() => {
@@ -99,12 +264,64 @@ export function useGame() {
     [roomId],
   );
 
+  const initiateVoteKick = useCallback(
+    (targetId: string) => {
+      socket.emit("vote:initiate", { roomId, targetId });
+    },
+    [roomId],
+  );
+
+  const castVoteKick = useCallback(() => {
+    socket.emit("vote:cast", { roomId });
+  }, [roomId]);
+
+  const hostBan = useCallback(
+    (targetId: string) => {
+      socket.emit("host:ban", { roomId, targetId });
+    },
+    [roomId],
+  );
+
+  const hostKick = useCallback(
+    (targetId: string) => {
+      socket.emit("host:kick", { roomId, targetId });
+    },
+    [roomId],
+  );
+
   const clearRoundEnd = useCallback(() => setRoundEnd(null), []);
   const clearError = useCallback(() => setError(""), []);
+  const clearPlayerQuit = useCallback(() => setPlayerQuitName(null), []);
+  const clearPlayerReconnected = useCallback(() => setPlayerReconnectedName(null), []);
+  const clearPlayerDisconnected = useCallback(() => setPlayerDisconnectedName(null), []);
+  const clearVoteComplete = useCallback(() => setVoteComplete(null), []);
+
+  const sendChat = useCallback(
+    (text: string) => {
+      if (roomId && text.trim()) {
+        socket.emit("chat:send", { roomId, text: text.trim() });
+      }
+    },
+    [roomId],
+  );
+
+  const fetchRooms = useCallback(() => {
+    socket.emit("room:list");
+  }, []);
+
+  const sendGlobalChat = useCallback((text: string) => {
+    socket.emit("global:chat", { text });
+  }, []);
+
+  const sendReaction = useCallback((roomId: string, emoji: string) => {
+    socket.emit("reaction:send", { roomId, emoji });
+  }, []);
 
   const quitGame = useCallback(() => {
     if (roomId) {
       socket.emit("player:quit", { roomId });
+      clearSession();
+      setChatMessages([]);
     }
   }, [roomId]);
 
@@ -116,14 +333,37 @@ export function useGame() {
     roundEnd,
     winnerId,
     error,
+    playerQuitName,
+    playerReconnectedName,
+    playerDisconnectedName,
+    kicked,
+    voteKick,
+    voteUpdate,
+    voteComplete,
+    chatMessages,
+    globalChatMessages,
+    reactions,
+    publicRooms,
     createRoom,
     joinRoom,
     startGame,
     placeBet,
     playCard,
     updateConfig,
+    initiateVoteKick,
+    castVoteKick,
+    hostBan,
+    hostKick,
     clearRoundEnd,
     clearError,
+    clearPlayerQuit,
+    clearPlayerReconnected,
+    clearPlayerDisconnected,
+    clearVoteComplete,
+    sendChat,
+    sendGlobalChat,
+    sendReaction,
+    fetchRooms,
     quitGame,
   };
 }

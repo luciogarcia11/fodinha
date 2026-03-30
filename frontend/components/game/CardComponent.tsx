@@ -11,6 +11,8 @@ interface CardProps {
   onClick?: () => void;
   small?: boolean;
   disabled?: boolean;
+  isWinning?: boolean;
+  isTied?: boolean;
 }
 
 export default function CardComponent({
@@ -20,6 +22,8 @@ export default function CardComponent({
   onClick,
   small = false,
   disabled = false,
+  isWinning = false,
+  isTied = false,
 }: CardProps) {
   const base = small
     ? 'w-12 h-18 rounded text-xs'
@@ -40,19 +44,34 @@ export default function CardComponent({
 
   const suitSymbol = SUIT_SYMBOLS[card.suit];
   const suitColor = SUIT_COLORS[card.suit];
+  
+  const isRedDeck = card.deckColor === 'red';
+  const isBlueDeck = card.deckColor === 'blue';
+
+  const defaultBg = isRedDeck ? 'bg-red-50' : (isBlueDeck ? 'bg-blue-50' : 'bg-white');
+  const defaultBorder = isRedDeck ? 'border-red-400' : (isBlueDeck ? 'border-blue-400' : 'border-gray-300');
 
   return (
     <motion.div
       className={`
-        ${base} bg-white border-2 flex flex-col justify-between p-1 select-none relative
-        ${selected ? 'border-yellow-400 shadow-yellow-300 shadow-lg' : 'border-gray-300'}
+        ${base} ${defaultBg} border-2 flex flex-col justify-between p-1 select-none relative
+        ${selected ? 'border-yellow-400 shadow-yellow-300 shadow-lg' : ''}
+        ${isWinning ? 'border-yellow-400 shadow-[0_0_12px_rgba(250,204,21,0.7)]' : ''}
+        ${isTied ? 'border-dashed border-gray-400 opacity-60' : ''}
+        ${!selected && !isWinning && !isTied ? defaultBorder : ''}
         ${onClick && !disabled ? 'cursor-pointer' : 'cursor-default'}
         ${card.isManilha ? 'ring-2 ring-yellow-400' : ''}
         ${small ? 'overflow-hidden' : ''}
       `}
       whileHover={onClick && !disabled ? { y: -8, scale: 1.05 } : {}}
       whileTap={onClick && !disabled ? { scale: 0.97 } : {}}
-      animate={selected ? { y: -12 } : { y: 0 }}
+      animate={
+        isWinning
+          ? { y: -4, scale: 1.05 }
+          : selected
+            ? { y: -12 }
+            : { y: 0 }
+      }
       transition={{ type: 'spring', stiffness: 300, damping: 20 }}
       onClick={!disabled ? onClick : undefined}
     >
@@ -73,6 +92,9 @@ export default function CardComponent({
         <div className="absolute top-0 right-0 bg-yellow-400 text-xs rounded-bl px-1 font-bold text-gray-900">
           M
         </div>
+      )}
+      {isWinning && (
+        <div className="absolute -top-1 -left-1 text-[10px]">👑</div>
       )}
     </motion.div>
   );
