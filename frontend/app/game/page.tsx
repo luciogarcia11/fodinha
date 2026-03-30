@@ -93,7 +93,28 @@ function GameContent() {
   }
 
   const me = gameState.players.find((p) => p.id === myId);
-  const others = gameState.players.filter((p) => p.id !== myId);
+
+  // Ordena os outros jogadores pela ordem de jogo (bettingOrder),
+  // começando pelo próximo após mim → vai para a esquerda.
+  // Sequência: esquerda → topo → direita (ordem de jogo da esq p/ dir).
+  const playOrder = gameState.bettingOrder; // IDs na ordem de jogo
+  const myOrderIndex = playOrder.indexOf(myId);
+  // Monta lista dos outros na sequência a partir do próximo após mim
+  const othersOrdered = (() => {
+    const result: typeof gameState.players = [];
+    const n = playOrder.length;
+    for (let i = 1; i < n; i++) {
+      const id = playOrder[(myOrderIndex + i) % n];
+      const p = gameState.players.find((p) => p.id === id);
+      if (p) result.push(p);
+    }
+    // Jogadores não presentes no bettingOrder (ex: eliminados) ficam no final
+    gameState.players.forEach((p) => {
+      if (p.id !== myId && !result.find((r) => r.id === p.id)) result.push(p);
+    });
+    return result;
+  })();
+  const others = othersOrdered;
   const activePlayers = gameState.players.filter((p) => !p.isEliminated);
   const isMyTurn = gameState.currentTurn === myId;
 
@@ -175,6 +196,33 @@ function GameContent() {
     );
   }
 
+  // Calcula posições absolutas dos jogadores ao redor da mesa.
+  // Ângulos: -120° (esquerda) a +120° (direita), passando por 0° (topo).
+  // O jogador na posição 0 da lista fica na esquerda (próximo a jogar).
+  function getPlayerPositions(count: number): { top: string; left: string; transform: string }[] {
+    if (count === 0) return [];
+    const positions: { top: string; left: string; transform: string }[] = [];
+    const startDeg = -120;
+    const endDeg = 120;
+    for (let i = 0; i < count; i++) {
+      const deg = count === 1 ? 0 : startDeg + (i * (endDeg - startDeg)) / (count - 1);
+      const rad = (deg * Math.PI) / 180;
+      // Elipse: rx=42% da largura, ry=40% da altura, centrado em 50%/50%
+      const rx = 42;
+      const ry = 40;
+      const left = 50 + rx * Math.sin(rad);
+      const top = 50 - ry * Math.cos(rad);
+      positions.push({
+        top: `${top}%`,
+        left: `${left}%`,
+        transform: "translate(-50%, -50%)",
+      });
+    }
+    return positions;
+  }
+
+  const otherPositions = getPlayerPositions(others.length);
+
   return (
     <main className="min-h-screen flex flex-col relative overflow-hidden select-none">
 
@@ -195,134 +243,143 @@ function GameContent() {
         <span className="text-white/40 text-[10px] md:text-xs font-mono">{roomCode}</span>
       </div>
 
-      {/* Outros jogadores */}
-      <div className="flex flex-wrap justify-center gap-2 md:gap-3 p-2 md:p-3 shrink-0">
-        {others.map((p) => (
-          <PlayerSlot key={p.id} player={p} />
+      {/* Área da mesa — posição relativa para os jogadores absolutos */}
+      <div className="flex-1 relative min-h-0">
+
+        {/* Jogadores ao redor da mesa (posicionados absolutamente) */}
+        {others.map((p, i) => (
+          <div
+            key={p.id}
+            className="absolute z-10"
+            style={otherPositions[i]}
+          >
+            <PlayerSlot player={p} />
+          </div>
         ))}
-      </div>
 
-      {/* Mesa central */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-2 md:gap-3 px-2 md:px-4">
+        {/* Centro da mesa */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 md:gap-3 px-2 md:px-4 pointer-events-none">
 
-        {/* Cartas na mesa */}
-        <div className="flex gap-2 md:gap-3 flex-wrap justify-center min-h-24 md:min-h-28 items-center
-          bg-green-900/30 rounded-2xl px-4 md:px-6 py-3 md:py-4 w-full max-w-lg border border-green-700/30">
-          {gameState.currentTrick.length > 0 ? (
-            gameState.currentTrick.map((t) => (
-              <div key={t.playerId} className="flex flex-col items-center gap-1">
-                <CardComponent card={t.card} />
-                <span className="text-[10px] md:text-xs text-white/50">
-                  {gameState.players.find((p) => p.id === t.playerId)?.name}
-                </span>
-              </div>
-            ))
-          ) : (
-            <p className="text-white/20 text-xs md:text-sm">Mesa vazia</p>
+          {/* Cartas na mesa */}
+          <div className="flex gap-2 md:gap-3 flex-wrap justify-center min-h-20 md:min-h-24 items-center
+            bg-green-900/40 rounded-2xl px-4 md:px-6 py-3 md:py-4 max-w-xs md:max-w-sm border border-green-700/30 pointer-events-auto">
+            {gameState.currentTrick.length > 0 ? (
+              gameState.currentTrick.map((t) => (
+                <div key={t.playerId} className="flex flex-col items-center gap-1">
+                  <CardComponent card={t.card} />
+                  <span className="text-[10px] md:text-xs text-white/50">
+                    {gameState.players.find((p) => p.id === t.playerId)?.name}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-white/20 text-xs md:text-sm">Mesa vazia</p>
+            )}
+          </div>
+
+          {/* Resultado da vaza */}
+          {trickResultVisible && trickResult && (
+            <div className="bg-black/80 border border-yellow-400/30 rounded-2xl px-5 md:px-8 py-3 md:py-4 text-center pointer-events-auto">
+              {trickResult.winnerId ? (
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-2xl md:text-3xl">
+                    {trickResult.winnerId === myId ? "🎉" : "🃏"}
+                  </span>
+                  <p className="text-yellow-400 font-black text-base md:text-lg">
+                    {trickResult.winnerId === myId
+                      ? "Você fez a vaza!"
+                      : `${gameState.players.find((p) => p.id === trickResult.winnerId)?.name} fez a vaza!`}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-2xl md:text-3xl">🤝</span>
+                  <p className="text-white/80 font-black text-base md:text-lg">
+                    Ninguém fez a vaza!
+                  </p>
+                </div>
+              )}
+            </div>
           )}
+
+          {/* Indicador de turno */}
+          {gameState.phase === "playing" && (
+            <div className={`rounded-xl px-3 md:px-4 py-2 text-xs md:text-sm font-bold text-center pointer-events-auto
+              ${isMyTurn ? "bg-yellow-400 text-gray-900" : "bg-white/10 text-white/60"}`}>
+              {isMyTurn
+                ? selectedCard !== null
+                  ? "👆 Clique novamente para jogar!"
+                  : "👆 Sua vez! Selecione uma carta"
+                : `⏳ Vez de ${gameState.players.find((p) => p.id === gameState.currentTurn)?.name}`}
+            </div>
+          )}
+
+          {/* Fase de apostas */}
+          {isBetting && (
+            <div className="bg-black/60 rounded-2xl p-3 md:p-4 text-center w-full max-w-xs pointer-events-auto">
+              {isMyBetTurn ? (
+                <div>
+                  <p className="text-white font-bold mb-1 text-sm md:text-base">
+                    Quantas vazas você vai fazer?
+                  </p>
+                  {isLastBetter &&
+                    gameState.cardsThisRound > 1 &&
+                    forbiddenBet >= 0 &&
+                    forbiddenBet <= gameState.cardsThisRound && (
+                      <p className="text-red-400 text-xs mb-2">
+                        Proibido apostar {forbiddenBet} (soma ficaria igual ao nº de vazas)
+                      </p>
+                    )}
+                  <div className="flex gap-2 flex-wrap justify-center">
+                    {Array.from({ length: gameState.cardsThisRound + 1 }, (_, i) => i).map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => placeBet(n)}
+                        disabled={gameState.cardsThisRound > 1 && n === forbiddenBet}
+                        className={`w-10 h-10 md:w-11 md:h-11 rounded-lg font-bold text-base md:text-lg transition-all
+                          ${gameState.cardsThisRound > 1 && n === forbiddenBet
+                            ? "bg-white/10 text-white/20 cursor-not-allowed line-through"
+                            : "bg-yellow-400 hover:bg-yellow-300 text-gray-900 active:scale-95"
+                          }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-white/80 font-bold text-xs md:text-sm">
+                    {alreadyBet
+                      ? `✅ Você apostou ${gameState.bets[myId]}`
+                      : "Aguarde sua vez de apostar..."}
+                  </p>
+                  <p className="text-white/40 text-[10px] md:text-xs mt-1">
+                    Vez de {gameState.players.find((p) => p.id === gameState.currentTurn)?.name}
+                  </p>
+                  <div className="flex gap-1 md:gap-2 flex-wrap justify-center mt-2">
+                    {gameState.bettingOrder.map((id) => {
+                      const p = gameState.players.find((x) => x.id === id);
+                      const b = gameState.bets[id];
+                      return (
+                        <div key={id} className="text-[10px] md:text-xs bg-white/10 rounded px-1.5 md:px-2 py-0.5 md:py-1">
+                          {p?.name}:{" "}
+                          {b !== undefined
+                            ? <span className="text-yellow-300 font-bold">{b}</span>
+                            : "..."}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
-
-        {/* Resultado da vaza */}
-        {trickResultVisible && trickResult && (
-          <div className="bg-black/80 border border-yellow-400/30 rounded-2xl px-6 md:px-8 py-3 md:py-4 text-center">
-            {trickResult.winnerId ? (
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-2xl md:text-3xl">
-                  {trickResult.winnerId === myId ? "🎉" : "🃏"}
-                </span>
-                <p className="text-yellow-400 font-black text-base md:text-lg">
-                  {trickResult.winnerId === myId
-                    ? "Você fez a vaza!"
-                    : `${gameState.players.find((p) => p.id === trickResult.winnerId)?.name} fez a vaza!`}
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-2xl md:text-3xl">🤝</span>
-                <p className="text-white/80 font-black text-base md:text-lg">
-                  Ninguém fez a vaza!
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Fase de apostas */}
-        {isBetting && (
-          <div className="bg-black/50 rounded-2xl p-3 md:p-4 text-center w-full max-w-sm">
-            {isMyBetTurn ? (
-              <div>
-                <p className="text-white font-bold mb-1 text-sm md:text-base">
-                  Quantas vazas você vai fazer?
-                </p>
-                {isLastBetter &&
-                  gameState.cardsThisRound > 1 &&
-                  forbiddenBet >= 0 &&
-                  forbiddenBet <= gameState.cardsThisRound && (
-                    <p className="text-red-400 text-xs mb-2">
-                      Proibido apostar {forbiddenBet} (soma ficaria igual ao nº de vazas)
-                    </p>
-                  )}
-                <div className="flex gap-2 flex-wrap justify-center">
-                  {Array.from({ length: gameState.cardsThisRound + 1 }, (_, i) => i).map((n) => (
-                    <button
-                      key={n}
-                      onClick={() => placeBet(n)}
-                      disabled={gameState.cardsThisRound > 1 && n === forbiddenBet}
-                      className={`w-10 h-10 md:w-11 md:h-11 rounded-lg font-bold text-base md:text-lg transition-all
-                        ${gameState.cardsThisRound > 1 && n === forbiddenBet
-                          ? "bg-white/10 text-white/20 cursor-not-allowed line-through"
-                          : "bg-yellow-400 hover:bg-yellow-300 text-gray-900 active:scale-95"
-                        }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div>
-                <p className="text-white/80 font-bold text-xs md:text-sm">
-                  {alreadyBet
-                    ? `✅ Você apostou ${gameState.bets[myId]}`
-                    : "Aguarde sua vez de apostar..."}
-                </p>
-                <p className="text-white/40 text-[10px] md:text-xs mt-1">
-                  Vez de {gameState.players.find((p) => p.id === gameState.currentTurn)?.name}
-                </p>
-                <div className="flex gap-1 md:gap-2 flex-wrap justify-center mt-2">
-                  {gameState.bettingOrder.map((id) => {
-                    const p = gameState.players.find((x) => x.id === id);
-                    const b = gameState.bets[id];
-                    return (
-                      <div key={id} className="text-[10px] md:text-xs bg-white/10 rounded px-1.5 md:px-2 py-0.5 md:py-1">
-                        {p?.name}:{" "}
-                        {b !== undefined
-                          ? <span className="text-yellow-300 font-bold">{b}</span>
-                          : "..."}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Indicador de turno */}
-        {gameState.phase === "playing" && (
-          <div className={`rounded-xl px-3 md:px-4 py-2 text-xs md:text-sm font-bold text-center
-            ${isMyTurn ? "bg-yellow-400 text-gray-900" : "bg-white/10 text-white/60"}`}>
-            {isMyTurn
-              ? selectedCard !== null
-                ? "👆 Clique novamente para jogar!"
-                : "👆 Sua vez! Selecione uma carta"
-              : `⏳ Vez de ${gameState.players.find((p) => p.id === gameState.currentTurn)?.name}`}
-          </div>
-        )}
       </div>
 
-      {/* Minha mão */}
+      {/* Minha mão — fixo na parte inferior */}
       {me && !me.isEliminated && (
         <div className="flex flex-col items-center gap-1.5 md:gap-2 pb-2 pt-2 shrink-0 bg-black/20">
           <div className="flex items-center gap-2 md:gap-3 text-xs md:text-sm flex-wrap justify-center px-2">
