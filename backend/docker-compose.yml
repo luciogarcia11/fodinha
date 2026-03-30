@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: fodinha-backend
+    restart: always
+    ports:
+      - "3001:3001"
+    volumes:
+      - sqlite_data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+
+volumes:
+  sqlite_data:
