@@ -36,10 +36,12 @@ export interface GameConfig {
 
 export interface ChatMessage {
   id: string;
+  roomId?: string;
   playerId: string;
   playerName: string;
   text: string;
-  timestamp: number;
+  timestamp?: number;
+  createdAt?: number;
 }
 
 export interface TrickState {

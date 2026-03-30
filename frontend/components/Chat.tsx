@@ -76,7 +76,7 @@ export default function Chat({
                 <div className="text-white/80 font-semibold">{m.playerName}</div>
                 <div className="text-white/90 break-words">{m.text}</div>
                 <div className="text-white/30 text-[10px]">
-                  {m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : new Date(m.createdAt * 1000).toLocaleTimeString()}
+                  {m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : m.createdAt ? new Date(m.createdAt * 1000).toLocaleTimeString() : new Date().toLocaleTimeString()}
                 </div>
               </div>
             ))}
