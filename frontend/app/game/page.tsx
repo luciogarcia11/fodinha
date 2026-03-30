@@ -116,7 +116,7 @@ function GameContent() {
   useEffect(() => {
     if (kicked) {
       const t = setTimeout(() => {
-        window.location.href = "https://fodinhamineirafront.vercel.app/";
+        router.push("/");
       }, 3000);
       return () => clearTimeout(t);
     }
@@ -139,7 +139,7 @@ function GameContent() {
           {winner?.id === myId ? "🎉 Você venceu!" : `${winner?.name} venceu!`}
         </p>
         <button
-          onClick={() => (window.location.href = "https://fodinhamineirafront.vercel.app/")}
+          onClick={() => router.push("/")}
           className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 px-8 rounded-xl text-lg"
         >
           Voltar ao início
@@ -474,23 +474,9 @@ function GameContent() {
       </div>
 
         {/* Chat panel (right) */}
-        <div className="absolute right-4 top-20 bottom-28 z-30 pointer-events-auto">
-          <Chat messages={chatMessages} send={sendChat} sendReaction={(emoji) => sendReaction(roomCode!, emoji)} />
+        <div className="absolute flex flex-col justify-end right-4 top-20 bottom-28 z-30 pointer-events-auto">
+          <Chat messages={chatMessages} send={sendChat} compact />
         </div>
-
-        {/* Reações (como no Meet - balãozinho que some) */}
-        {reactions.map((reaction, idx) => (
-          <div
-            key={idx}
-            className="fixed pointer-events-none z-40 text-4xl animate-bounce"
-            style={{
-              left: `${20 + Math.random() * 60}%`,
-              top: `${30 + Math.random() * 40}%`,
-            }}
-          >
-            {reaction.emoji}
-          </div>
-        ))}
 
       {/* Minha mão — fixo na parte inferior */}
       {me && !me.isEliminated && (
@@ -630,7 +616,7 @@ function GameContent() {
               <button
                 onClick={() => {
                   quitGame();
-                  window.location.href = "https://fodinhamineirafront.vercel.app/";
+                  router.push("/");
                 }}
                 className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg text-sm"
               >

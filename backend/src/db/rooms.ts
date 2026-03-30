@@ -175,7 +175,7 @@ export function listPublicRooms(): Array<{
 
   return rows.map(row => ({
     roomId: row.id,
-    hostName: row.host_id, // We'll get this from players
+    hostName: row.host_name,
     playerCount: getPlayerCount(row.id),
     maxPlayers: 10,
     config: {
