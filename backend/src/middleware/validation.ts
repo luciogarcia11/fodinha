@@ -36,7 +36,7 @@ export function validatePlayerName(name: any): string {
   }
 
   // Check for invalid characters (only allow letters, numbers, spaces, and basic punctuation)
-  if (!/^[\p{L}\p{N}\s\-\.\'_]+$/u.test(trimmed)) {
+  if (!/^[\p{L}\p{N}\s.'_-]+$/u.test(trimmed)) {
     throw new ValidationError('Nome contém caracteres inválidos');
   }
 
