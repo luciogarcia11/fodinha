@@ -114,7 +114,7 @@ export function loadRoom(roomId: string): GameState | null {
     sessionId: row.session_id,
   }));
 
-  const chatStmt = db.prepare('SELECT * FROM room_chat WHERE room_id = ? ORDER BY timestamp DESC LIMIT 100');
+  const chatStmt = db.prepare('SELECT * FROM room_chat WHERE room_id = ? ORDER BY timestamp DESC LIMIT 30');
   const chatRows = chatStmt.all(roomId) as any[];
   const chatMessages: ChatMessage[] = chatRows.reverse().map(row => ({
     id: row.id,
@@ -123,6 +123,8 @@ export function loadRoom(roomId: string): GameState | null {
     text: row.text,
     timestamp: row.timestamp,
   }));
+
+  console.log(`[LoadRoom] Sala ${roomId} carregada do banco - chatMessages: ${chatMessages.length}`);
 
   return {
     roomId: room.id,
@@ -238,10 +240,17 @@ export function addRoomChatMessage(
     timestamp: Date.now(),
   };
 
-  db.prepare(`
-    INSERT INTO room_chat (id, room_id, player_id, player_name, text, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(message.id, message.roomId, message.playerId, message.playerName, message.text, message.timestamp);
+  try {
+    db.prepare(`
+      INSERT INTO room_chat (id, room_id, player_id, player_name, text, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(message.id, message.roomId, message.playerId, message.playerName, message.text, message.timestamp);
+
+    console.log(`[DB] Mensagem salva no banco - Sala: ${roomId}, Mensagem: ${text.substring(0, 30)}...`);
+  } catch (error) {
+    console.error('[DB] Erro ao salvar mensagem no banco:', error);
+    throw error;
+  }
 
   return message;
 }
@@ -312,6 +321,13 @@ export function updateRoomActivity(roomId: string): void {
 // Cleanup inactive rooms (older than 1 hour and in lobby)
 export function cleanupInactiveRooms(): number {
   const oneHourAgo = Math.floor(Date.now() / 1000) - 3600;
-  const result = db.prepare('DELETE FROM rooms WHERE last_activity < ? AND phase = "lobby"').run(oneHourAgo);
+  const result = db.prepare("DELETE FROM rooms WHERE last_activity < ? AND phase = 'lobby'").run(oneHourAgo);
   return result.changes;
+}
+
+// Get room last activity timestamp
+export function loadRoomLastActivity(roomId: string): number | null {
+  const stmt = db.prepare('SELECT last_activity FROM rooms WHERE id = ?');
+  const result = stmt.get(roomId) as any;
+  return result?.last_activity || null;
 }

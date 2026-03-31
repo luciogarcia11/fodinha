@@ -148,7 +148,7 @@ export function initializeDatabase() {
   db.exec(`
     CREATE TRIGGER IF NOT EXISTS cleanup_room_chat
     AFTER INSERT ON room_chat
-    WHEN (SELECT COUNT(*) FROM room_chat WHERE room_id = NEW.room_id) > 100
+    WHEN (SELECT COUNT(*) FROM room_chat WHERE room_id = NEW.room_id) > 30
     BEGIN
       DELETE FROM room_chat WHERE id IN (
         SELECT id FROM room_chat

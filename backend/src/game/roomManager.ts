@@ -13,10 +13,18 @@ import {
   updateRoomActivity,
   banPlayer as banPlayerDB,
   getBannedPlayers,
+  loadRoomLastActivity,
 } from '../db/rooms';
 
 // In-memory cache for active rooms (synced with SQLite)
 const rooms = new Map<string, GameState>();
+
+// Referência ao Set de gameOverRooms do index.ts para limpar quando sala for deletada
+let gameOverRoomsRef: Set<string> | null = null;
+
+export function setGameOverRoomsRef(ref: Set<string>) {
+  gameOverRoomsRef = ref;
+}
 
 // Timers de reconexão (sessionId → timeout)
 const disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -88,6 +96,13 @@ export function getAllRooms(): Map<string, GameState> {
   return rooms;
 }
 
+/**
+ * Update a room in the in-memory cache (used for sync after reload from DB)
+ */
+export function updateRoomInCache(roomId: string, state: GameState): void {
+  rooms.set(roomId, state);
+}
+
 export function joinRoom(roomId: string, playerId: string, playerName: string): GameState | null {
   const state = rooms.get(roomId);
   if (!state || state.phase !== 'lobby') return null;
@@ -123,20 +138,18 @@ export function joinRoom(roomId: string, playerId: string, playerName: string): 
 /**
  * Reconecta um jogador à sala usando sessionId.
  * Atualiza o socket id do jogador e cancela o timer de desconexão.
+ * Garante que o cache em memória esteja sincronizado com o banco de dados.
  */
 export function rejoinRoom(roomId: string, sessionId: string, newSocketId: string): GameState | null {
-  // Try to load from cache first
-  let state: GameState | undefined | null = rooms.get(roomId);
-
-  // If not in cache, try to load from SQLite
-  if (!state) {
-    state = loadRoom(roomId);
-    if (state) {
-      rooms.set(roomId, state);
-    }
-  }
-
+  // Always load from SQLite to ensure data consistency
+  // This ensures chat messages are always up-to-date from database
+  const state = loadRoom(roomId);
   if (!state) return null;
+
+  // Update in-memory cache with fresh data from database
+  rooms.set(roomId, state);
+
+  console.log(`[Rejoin] Sala ${roomId} carregada do banco para jogador ${newSocketId} - chatMessages: ${state.chatMessages.length}`);
 
   // Check if this session is banned (from SQLite)
   if (isPlayerBanned(roomId, sessionId)) return null;
@@ -247,15 +260,52 @@ export function disconnectPlayer(
   const player = state.players.find(p => p.id === playerId);
   if (!player) return null;
 
+  // Cancela timer anterior se existir (evita duplicação)
+  const existingTimer = disconnectTimers.get(player.sessionId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    disconnectTimers.delete(player.sessionId);
+  }
+
   player.connected = false;
 
   if (state.phase !== 'lobby') {
+    // Captura os dados necessários em closures para evitar perda de referência
+    const sessionId = player.sessionId;
+    const playerName = player.name;
+
     // Inicia timer de reconexão (30 segundos)
     const timer = setTimeout(() => {
-      player.isEliminated = true;
-      player.lives = 0;
-      disconnectTimers.delete(player.sessionId);
-      if (onEliminate) onEliminate();
+      try {
+        const currentState = rooms.get(roomId);
+        if (!currentState) {
+          console.error(`[Disconnect Timer] Sala ${roomId} não existe mais`);
+          return;
+        }
+
+        const currentPlayer = currentState.players.find(p => p.sessionId === sessionId);
+        if (!currentPlayer) {
+          console.error(`[Disconnect Timer] Jogador ${playerName} não encontrado na sala ${roomId}`);
+          return;
+        }
+
+        // Evita eliminação dupla
+        if (currentPlayer.isEliminated) {
+          console.log(`[Disconnect Timer] Jogador ${playerName} já foi eliminado, ignorando`);
+          return;
+        }
+
+        console.log(`[Disconnect Timer] Eliminando jogador ${playerName} por timeout na sala ${roomId}`);
+        currentPlayer.isEliminated = true;
+        currentPlayer.lives = 0;
+        disconnectTimers.delete(sessionId);
+
+        if (onEliminate) {
+          onEliminate();
+        }
+      } catch (error) {
+        console.error('[Disconnect Timer] Erro ao processar eliminação:', error);
+      }
     }, 30000);
     disconnectTimers.set(player.sessionId, timer);
   } else {
@@ -303,22 +353,80 @@ export function listPublicRooms(): Array<{
 
 /**
  * Limpa salas vazias ou abandonadas.
+ * Remove tanto do Map in-memory quanto do SQLite.
+ * Verifica last_activity para não remover salas recentemente ativas (menos de 30 minutos).
+ * Não remove salas que têm timers de reconexão ativos.
  */
-export function cleanupEmptyRooms(): void {
+export function cleanupEmptyRooms(): { removedCount: number; details: Array<{ roomId: string; phase: string; lastActivity?: number }> } {
+  const removedRooms: Array<{ roomId: string; phase: string; lastActivity?: number }> = [];
+  const thirtyMinutesAgo = Math.floor(Date.now() / 1000) - 1800; // 30 minutos em segundos
+
   for (const [roomId, state] of rooms) {
     const connected = state.players.filter(p => p.connected);
-    if (connected.length === 0 && state.phase !== 'lobby') {
-      rooms.delete(roomId);
-    }
+    const shouldRemove = connected.length === 0 && state.phase !== 'lobby';
+
     // Remove lobby rooms with no players
-    if (state.players.length === 0) {
-      rooms.delete(roomId);
+    const shouldRemoveLobby = state.players.length === 0;
+
+    if (shouldRemove || shouldRemoveLobby) {
+      // Verifica se há timers de desconexão ativos para jogadores desta sala
+      const hasActiveDisconnectTimers = state.players.some(p =>
+        disconnectTimers.has(p.sessionId)
+      );
+
+      if (hasActiveDisconnectTimers) {
+        console.log(`⏸️  Sala ${roomId} mantida (tem timers de reconexão ativos)`);
+        continue;
+      }
+
+      // Get last activity from DB to check if room is recently active
+      try {
+        const lastActivity = loadRoomLastActivity(roomId);
+
+        // Don't remove if recently active (less than 30 minutes)
+        if (lastActivity && lastActivity > thirtyMinutesAgo) {
+          console.log(`⏸️  Sala ${roomId} mantida (atividade recente: ${new Date(lastActivity * 1000).toISOString()})`);
+          continue;
+        }
+
+        rooms.delete(roomId);
+        deleteRoomDB(roomId);
+
+        // Limpa timers de desconexão associados a esta sala
+        state.players.forEach(player => {
+          const timer = disconnectTimers.get(player.sessionId);
+          if (timer) {
+            clearTimeout(timer);
+            disconnectTimers.delete(player.sessionId);
+          }
+        });
+
+        // Limpa o flag de game_over se existir
+        if (gameOverRoomsRef) {
+          gameOverRoomsRef.delete(roomId);
+        }
+
+        console.log(`🗑️  Sala ${roomId} removida (fase: ${state.phase}, jogadores: ${state.players.length})`);
+        removedRooms.push({
+          roomId,
+          phase: state.phase,
+          lastActivity: lastActivity || undefined,
+        });
+      } catch (error) {
+        console.error(`❌ Erro ao limpar sala ${roomId}:`, error);
+      }
     }
   }
+
+  return {
+    removedCount: removedRooms.length,
+    details: removedRooms,
+  };
 }
 
 /**
  * Adiciona mensagem de chat à sala com rate limiting.
+ * Sempre salva no banco de dados primeiro e depois atualiza o cache.
  */
 export function addChatMessage(
   roomId: string,
@@ -342,15 +450,17 @@ export function addChatMessage(
 
   if (!sanitized) return null;
 
+  // First save to database
   const message = addRoomChatMessage(roomId, playerId, playerName, sanitized);
 
-  // Update in-memory cache
+  // Then update in-memory cache
   state.chatMessages.push(message);
-  if (state.chatMessages.length > 100) {
-    state.chatMessages = state.chatMessages.slice(-100);
+  if (state.chatMessages.length > 30) {
+    state.chatMessages = state.chatMessages.slice(-30);
   }
 
   updateRoomActivity(roomId);
+  console.log(`[Chat] Mensagem adicionada à sala ${roomId}: ${playerName} - ${sanitized.substring(0, 30)}...`);
   return message;
 }
 

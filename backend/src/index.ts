@@ -17,6 +17,8 @@ import {
   addChatMessage,
   addReaction,
   banPlayer as banPlayerRoom,
+  setGameOverRoomsRef,
+  updateRoomInCache,
 } from "./game/roomManager";
 import {
   resolveVaza,
@@ -33,7 +35,7 @@ import {
   getGlobalChatMessages,
   addGlobalChatMessage,
 } from "./db/schema";
-import { getRoomReactions, checkRateLimit } from "./db/rooms";
+import { getRoomReactions, checkRateLimit, cleanupInactiveRooms } from "./db/rooms";
 import {
   validatePlayerName,
   validateRoomCode,
@@ -115,6 +117,252 @@ app.get("/api/rooms/:roomId/reactions", (req, res) => {
   res.json(getRoomReactions(roomId));
 });
 
+// ===== ADMIN ENDPOINTS =====
+
+// Basic authentication middleware
+function basicAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    res.setHeader('WWW-Authenticate', 'Basic');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const encoded = authHeader.split(' ')[1];
+  const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
+  const [username, password] = decoded.split(':');
+
+  if (username !== 'admin' || password !== 'secret123') {
+    return res.status(403).json({ error: 'Invalid credentials' });
+  }
+
+  next();
+}
+
+// POST: Limpar salas vazias manualmente
+app.post("/api/admin/cleanup-rooms", basicAuth, (req, res) => {
+  try {
+    console.log('🔧 Iniciando limpeza manual de salas vazias...');
+    const result = cleanupEmptyRooms();
+    console.log(`✅ Limpeza concluída: ${result.removedCount} salas removidas`);
+
+    res.json({
+      success: true,
+      removedCount: result.removedCount,
+      details: result.details,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('❌ Erro na limpeza de salas:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// POST: Forçar limpeza imediata (mais agressiva)
+app.post("/api/admin/force-cleanup", basicAuth, (req, res) => {
+  try {
+    console.log('🔧 Iniciando limpeza forçada de salas...');
+    const result = cleanupEmptyRooms();
+
+    // Additional aggressive cleanup: remove rooms inactive for more than 1 hour
+    const inactiveRemoved = cleanupInactiveRooms();
+
+    const totalRemoved = result.removedCount + inactiveRemoved;
+
+    console.log(`✅ Limpeza forçada concluída: ${result.removedCount} salas vazias + ${inactiveRemoved} salas inativas = ${totalRemoved} total`);
+
+    res.json({
+      success: true,
+      emptyRoomsRemoved: result.removedCount,
+      inactiveRoomsRemoved: inactiveRemoved,
+      totalRemoved,
+      emptyRoomDetails: result.details,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('❌ Erro na limpeza forçada:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// GET: Status das salas (admin)
+app.get("/api/admin/rooms-status", basicAuth, (req, res) => {
+  try {
+    const allRooms = getAllRooms();
+    const roomsStatus = Array.from(allRooms.values()).map(room => ({
+      roomId: room.roomId,
+      phase: room.phase,
+      playerCount: room.players.length,
+      connectedCount: room.players.filter(p => p.connected).length,
+      hostName: room.hostName,
+      round: room.round,
+      isPublic: room.config.isPublic,
+      chatMessagesCount: room.chatMessages.length,
+    }));
+
+    res.json({
+      success: true,
+      totalRooms: roomsStatus.length,
+      rooms: roomsStatus,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('❌ Erro ao obter status das salas:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// GET: Verificar estado do chat de uma sala no banco de dados (admin)
+app.get("/api/admin/room/:roomId/chat", basicAuth, (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { loadRoom } = require('./db/rooms');
+    const room = loadRoom(roomId);
+
+    if (!room) {
+      return res.status(404).json({
+        error: 'Room not found',
+        message: `Sala ${roomId} não encontrada no banco de dados`
+      });
+    }
+
+    res.json({
+      success: true,
+      roomId,
+      chatMessages: room.chatMessages,
+      chatMessagesCount: room.chatMessages.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('❌ Erro ao obter chat da sala:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// DELETE: Limpar mensagens antigas de uma sala (admin)
+app.delete("/api/admin/room/:roomId/chat/old", basicAuth, (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const days = parseInt(req.query.days as string) || 7; // Default: 7 days
+    const seconds = days * 24 * 60 * 60;
+    const cutoffTime = Math.floor(Date.now() / 1000) - seconds;
+
+    const db = require('./db/schema').db;
+
+    // Delete old messages
+    const result = db.prepare(`
+      DELETE FROM room_chat
+      WHERE room_id = ? AND timestamp < ?
+    `).run(roomId, cutoffTime);
+
+    console.log(`[Admin] Limpando mensagens antigas da sala ${roomId}: ${result.changes} mensagens removidas`);
+
+    res.json({
+      success: true,
+      roomId,
+      messagesDeleted: result.changes,
+      cutoffDate: new Date(cutoffTime * 1000).toISOString(),
+      days,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('❌ Erro ao limpar mensagens antigas:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// DELETE: Limpar todas as mensagens de uma sala (admin)
+app.delete("/api/admin/room/:roomId/chat/all", basicAuth, (req, res) => {
+  try {
+    const roomIdParam = req.params.roomId;
+    // Ensure roomId is a string (Express may return array)
+    const roomId = Array.isArray(roomIdParam) ? roomIdParam[0] : roomIdParam;
+
+    const db = require('./db/schema').db;
+
+    // Delete all messages
+    const result = db.prepare('DELETE FROM room_chat WHERE room_id = ?').run(roomId);
+
+    console.log(`[Admin] Limpando todas as mensagens da sala ${roomId}: ${result.changes} mensagens removidas`);
+
+    // Also clear in-memory cache
+    const state = getRoom(roomId);
+    if (state) {
+      const previousCount = state.chatMessages.length;
+      state.chatMessages = [];
+      console.log(`[Admin] Cache em memória limpo: ${previousCount} mensagens removidas`);
+    }
+
+    res.json({
+      success: true,
+      roomId,
+      messagesDeleted: result.changes,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('❌ Erro ao limpar todas as mensagens:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// POST: Recarregar sala do banco de dados para sincronizar cache (admin)
+app.post("/api/admin/room/:roomId/reload", basicAuth, (req, res) => {
+  try {
+    const roomIdParam = req.params.roomId;
+    // Ensure roomId is a string (Express may return array)
+    const roomId = Array.isArray(roomIdParam) ? roomIdParam[0] : roomIdParam;
+
+    const { loadRoom } = require('./db/rooms');
+
+    const room = loadRoom(roomId);
+    if (!room) {
+      return res.status(404).json({
+        error: 'Room not found',
+        message: `Sala ${roomId} não encontrada no banco de dados`
+      });
+    }
+
+    // Update in-memory cache
+    updateRoomInCache(roomId, room);
+
+    const previousChatCount = getRoom(roomId)?.chatMessages.length || 0;
+
+    console.log(`[Admin] Sala ${roomId} recarregada do banco - chatMessages: ${room.chatMessages.length}`);
+
+    res.json({
+      success: true,
+      roomId,
+      chatMessages: room.chatMessages,
+      chatMessagesCount: room.chatMessages.length,
+      previousChatCount,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('❌ Erro ao recarregar sala:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 // Cleanup de salas vazias periódico (a cada 60s)
 setInterval(() => cleanupEmptyRooms(), 60000);
 
@@ -136,6 +384,12 @@ function getNextPlayer(state: { bettingOrder: string[]; players: { id: string; i
 // Timers de AFK (roomId -> timeout)
 const afkTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// Track rooms that have already ended to prevent duplicate game_over events
+const gameOverRooms = new Set<string>();
+
+// Inicializa a referência no roomManager para limpar quando sala for deletada
+setGameOverRoomsRef(gameOverRooms);
+
 function resetAfkTimer(roomId: string) {
   const existing = afkTimers.get(roomId);
   if (existing) clearTimeout(existing);
@@ -152,6 +406,28 @@ function resetAfkTimer(roomId: string) {
   afkTimers.set(roomId, timer);
 }
 
+/**
+ * Verifica se o jogo acabou de forma segura, evitando game_over duplicado.
+ * Retorna true se o game_over foi emitido, false caso contrário.
+ */
+function checkAndEmitGameOver(roomId: string, state: any): boolean {
+  if (gameOverRooms.has(roomId)) {
+    console.log(`[Game Over] Sala ${roomId} já está em game_over, ignorando`);
+    return false;
+  }
+
+  const remaining = state.players.filter((p: any) => !p.isEliminated);
+  if (remaining.length < 2) {
+    state.phase = "game_over";
+    gameOverRooms.add(roomId);
+    const winner = remaining[0];
+    io.to(roomId).emit("game:over", { winnerId: winner?.id ?? null });
+    console.log(`[Game Over] Sala ${roomId} finalizada - vencedor: ${winner?.name ?? 'nenhum'}`);
+    return true;
+  }
+  return false;
+}
+
 function clearAfkTimer(roomId: string) {
   const existing = afkTimers.get(roomId);
   if (existing) {
@@ -161,14 +437,22 @@ function clearAfkTimer(roomId: string) {
 }
 
 function handleAfkKick(roomId: string) {
-  const state = getRoom(roomId);
-  if (!state) return;
-  const targetId = state.currentTurn;
-  const target = state.players.find(p => p.id === targetId);
-  if (!target) return;
+  try {
+    const state = getRoom(roomId);
+    if (!state) return;
+    const targetId = state.currentTurn;
+    const target = state.players.find(p => p.id === targetId);
+    if (!target) return;
 
-  target.isEliminated = true;
-  target.lives = 0;
+    // Evita eliminação dupla - verifica se já foi eliminado
+    if (target.isEliminated) {
+      console.log(`[AFK] Jogador ${target.name} já foi eliminado, ignorando`);
+      return;
+    }
+
+    console.log(`[AFK] Removendo jogador ${target.name} por inatividade na sala ${roomId}`);
+    target.isEliminated = true;
+    target.lives = 0;
   
   if (state.phase === "betting") {
     const idx = state.bettingOrder.indexOf(targetId);
@@ -194,16 +478,16 @@ function handleAfkKick(roomId: string) {
   io.to(targetId).emit("game:kicked", { message: "Você foi removido por inatividade (AFK)." });
   io.to(roomId).emit("game:playerQuit", { playerName: target.name });
 
-  const remaining = state.players.filter(p => !p.isEliminated);
-  if (remaining.length < 2) {
-    state.phase = "game_over";
-    io.to(roomId).emit("game:over", { winnerId: remaining[0]?.id ?? null });
+  if (checkAndEmitGameOver(roomId, state)) {
     clearAfkTimer(roomId);
   } else {
     resetAfkTimer(roomId);
   }
 
   io.to(roomId).emit("game:stateUpdate", state);
+  } catch (error) {
+    console.error('[AFK] Erro ao processar kick por AFK:', error);
+  }
 }
 
 io.on("connection", (socket) => {
@@ -285,6 +569,8 @@ io.on("connection", (socket) => {
     if (!state || state.hostId !== socket.id) return;
     const started = startGame(roomId);
     if (started) {
+      // Limpa o flag de game_over ao iniciar um novo jogo
+      gameOverRooms.delete(roomId);
       io.to(roomId).emit("game:stateUpdate", started);
       resetAfkTimer(roomId);
     }
@@ -410,7 +696,9 @@ io.on("connection", (socket) => {
               const gameWinner = checkGameOver(state.players);
               if (gameWinner !== null) {
                 state.phase = "game_over";
+                gameOverRooms.add(roomId);
                 io.to(roomId).emit("game:over", { winnerId: gameWinner });
+                console.log(`[Round End] Game over na sala ${roomId} - vencedor: ${gameWinner}`);
               } else {
                 setTimeout(() => {
                   state.round++;
@@ -589,12 +877,7 @@ io.on("connection", (socket) => {
       const kickTimer = voteKickTimers.get(roomId);
       if (kickTimer) { clearTimeout(kickTimer); voteKickTimers.delete(roomId); }
 
-      // Verifica game over
-      const remaining = state.players.filter(p => !p.isEliminated);
-      if (remaining.length < 2) {
-        state.phase = "game_over";
-        io.to(roomId).emit("game:over", { winnerId: remaining[0]?.id ?? null });
-      }
+      checkAndEmitGameOver(roomId, state);
 
       io.to(roomId).emit("game:stateUpdate", state);
       resetAfkTimer(roomId);
@@ -625,12 +908,7 @@ io.on("connection", (socket) => {
     io.to(targetId).emit("game:kicked", { message: "Você foi banido pelo host." });
     io.to(roomId).emit("game:playerQuit", { playerName: target.name });
 
-    // Verifica game over
-    const remaining = state.players.filter(p => !p.isEliminated);
-    if (remaining.length < 2) {
-      state.phase = "game_over";
-      io.to(roomId).emit("game:over", { winnerId: remaining[0]?.id ?? null });
-    }
+    checkAndEmitGameOver(roomId, state);
 
     io.to(roomId).emit("game:stateUpdate", state);
     resetAfkTimer(roomId);
@@ -656,11 +934,7 @@ io.on("connection", (socket) => {
     io.to(targetId).emit("game:kicked", { message: "Você foi removido pelo host." });
     io.to(roomId).emit("game:playerQuit", { playerName: target.name });
 
-    const remaining = state.players.filter(p => !p.isEliminated);
-    if (remaining.length < 2) {
-      state.phase = "game_over";
-      io.to(roomId).emit("game:over", { winnerId: remaining[0]?.id ?? null });
-    }
+    checkAndEmitGameOver(roomId, state);
 
     io.to(roomId).emit("game:stateUpdate", state);
     resetAfkTimer(roomId);
@@ -734,52 +1008,75 @@ io.on("connection", (socket) => {
   // ===== DISCONNECT =====
   socket.on("disconnect", () => {
     console.log(`❌ Desconectado: ${socket.id}`);
-    for (const [roomId, state] of getAllRooms()) {
-      const player = state.players.find((p) => p.id === socket.id);
-      if (!player) continue;
+    try {
+      for (const [roomId, state] of getAllRooms()) {
+        const player = state.players.find((p) => p.id === socket.id);
+        if (!player) continue;
 
-      if (state.phase === "lobby") {
-        // No lobby: remove imediatamente
-        disconnectPlayer(roomId, socket.id);
+        console.log(`[Disconnect] Jogador ${player.name} desconectado da sala ${roomId} (fase: ${state.phase})`);
+
+        if (state.phase === "lobby") {
+          // No lobby: remove imediatamente
+          disconnectPlayer(roomId, socket.id);
+          io.to(roomId).emit("game:stateUpdate", state);
+          break;
+        }
+
+        // Em jogo: marca como desconectado, inicia timer de 30s
+        disconnectPlayer(roomId, socket.id, () => {
+          try {
+            // Timer expirou — jogador é eliminado
+            console.log(`[Disconnect] Timer expirado para jogador ${player.name} na sala ${roomId}`);
+
+            const freshState = getRoom(roomId);
+            if (!freshState) {
+              console.error(`[Disconnect] Sala ${roomId} não existe mais`);
+              return;
+            }
+
+            const freshPlayer = freshState.players.find((p) => p.id === socket.id);
+            if (!freshPlayer || freshPlayer.isEliminated) {
+              console.log(`[Disconnect] Jogador já foi eliminado ou não encontrado, ignorando`);
+              return;
+            }
+
+            // Elimina o jogador
+            freshPlayer.isEliminated = true;
+            freshPlayer.lives = 0;
+
+            const activePlayers = freshState.players.filter(p => !p.isEliminated);
+
+            // Se era a vez dele, avança
+            if (freshState.currentTurn === socket.id) {
+              freshState.currentTurn = getNextPlayer(freshState, socket.id);
+            }
+            freshState.bettingOrder = freshState.bettingOrder.filter(id => id !== socket.id);
+
+            // Se está no meio de uma vaza na fase de apostas, verifica se todos apostaram
+            if (freshState.phase === "betting") {
+              const remainingBettors = freshState.bettingOrder.filter(id => !(id in freshState.bets));
+              if (remainingBettors.length === 0) {
+                freshState.phase = "playing";
+                freshState.currentTurn = freshState.trickLeader;
+              }
+            }
+
+            checkAndEmitGameOver(roomId, freshState);
+
+            io.to(roomId).emit("game:stateUpdate", freshState);
+            io.to(roomId).emit("game:playerQuit", { playerName: player.name });
+            resetAfkTimer(roomId);
+          } catch (error) {
+            console.error('[Disconnect] Erro no callback de eliminação:', error);
+          }
+        });
+
+        io.to(roomId).emit("game:playerDisconnected", { playerName: player.name });
         io.to(roomId).emit("game:stateUpdate", state);
         break;
       }
-
-      // Em jogo: marca como desconectado, inicia timer de 30s
-      disconnectPlayer(roomId, socket.id, () => {
-        // Timer expirou — jogador é eliminado
-        const activePlayers = state.players.filter(p => !p.isEliminated);
-
-        // Se era a vez dele, avança
-        if (state.currentTurn === socket.id) {
-          state.currentTurn = getNextPlayer(state, socket.id);
-        }
-        state.bettingOrder = state.bettingOrder.filter(id => id !== socket.id);
-
-        // Se está no meio de uma vaza na fase de apostas, verifica se todos apostaram
-        if (state.phase === "betting") {
-          const remainingBettors = state.bettingOrder.filter(id => !(id in state.bets));
-          if (remainingBettors.length === 0) {
-            state.phase = "playing";
-            state.currentTurn = state.trickLeader;
-          }
-        }
-
-        // Verifica game over 
-        const remaining = state.players.filter(p => !p.isEliminated);
-        if (remaining.length < 2) {
-          state.phase = "game_over";
-          io.to(roomId).emit("game:over", { winnerId: remaining[0]?.id ?? null });
-        }
-
-        io.to(roomId).emit("game:stateUpdate", state);
-        io.to(roomId).emit("game:playerQuit", { playerName: player.name });
-        resetAfkTimer(roomId);
-      });
-
-      io.to(roomId).emit("game:playerDisconnected", { playerName: player.name });
-      io.to(roomId).emit("game:stateUpdate", state);
-      break;
+    } catch (error) {
+      console.error('[Disconnect] Erro ao processar desconexão:', error);
     }
   });
 });
