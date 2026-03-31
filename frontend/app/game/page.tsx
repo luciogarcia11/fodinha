@@ -71,6 +71,20 @@ function GameContent() {
     if (gameState.phase === "lobby") router.push(`/lobby?room=${roomCode}`);
   }, [gameState, roomCode, router]);
 
+  // Verificar se está na página correta baseada no estado do jogo
+  useEffect(() => {
+    if (!gameState || !roomCode) return;
+
+    const currentPath = window.location.pathname;
+    const expectedPath = `/game?room=${roomCode}`;
+
+    // Se está na página errada e não está em game_over, redireciona
+    if (currentPath !== expectedPath && gameState.phase !== 'game_over' && gameState.phase !== 'lobby') {
+      console.log('[Game] Redirecionando para página correta:', expectedPath);
+      router.push(expectedPath);
+    }
+  }, [gameState, roomCode, router]);
+
   useEffect(() => {
     if (trickResultVisible && trickResult) {
       const t = setTimeout(() => {
@@ -317,7 +331,16 @@ function GameContent() {
 
       {/* Header */}
       <div className="flex items-center justify-between px-3 md:px-4 py-2 bg-black/30 shrink-0">
-        <span className="font-bold text-yellow-400 text-xs md:text-sm">🃏 Fodinha</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/")}
+            className="text-white/40 hover:text-white transition-colors"
+            title="Voltar ao início"
+          >
+            ←
+          </button>
+          <span className="font-bold text-yellow-400 text-xs md:text-sm">🃏 Fodinha</span>
+        </div>
         <div className="flex flex-col items-center">
           <span className="text-white text-xs md:text-sm font-bold">
             Rodada {gameState.round} — {gameState.cardsThisRound} carta

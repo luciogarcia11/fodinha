@@ -18,6 +18,20 @@ function LobbyContent() {
     }
   }, [gameState?.phase, router, roomCode]);
 
+  // Verificar se está na página correta baseada no estado do jogo
+  useEffect(() => {
+    if (!gameState || !roomCode) return;
+
+    const currentPath = window.location.pathname;
+    const expectedPath = `/lobby?room=${roomCode}`;
+
+    // Se está na página errada, redireciona
+    if (currentPath !== expectedPath && gameState.phase === 'lobby') {
+      console.log('[Lobby] Redirecionando para página correta:', expectedPath);
+      router.push(expectedPath);
+    }
+  }, [gameState, roomCode, router]);
+
   if (!gameState) {
     return (
       <main className="min-h-screen flex items-center justify-center">
@@ -202,6 +216,14 @@ function LobbyContent() {
           Aguardando o host iniciar o jogo...
         </p>
       )}
+
+      {/* Botão de voltar para home */}
+      <button
+        onClick={() => router.push("/")}
+        className="text-white/40 hover:text-white text-sm transition-colors mt-4"
+      >
+        ← Voltar ao início
+      </button>
     </main>
   );
 }

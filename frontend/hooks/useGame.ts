@@ -58,16 +58,37 @@ export function useGame() {
     socket.connect();
 
     socket.on("connect", () => {
+      console.log('[useGame] Socket conectado:', socket.id);
       setMyId(socket.id ?? "");
 
       // Tentar reconnect com sessão salva
       const session = loadSession();
       if (session) {
+        console.log('[useGame] Tentando reconectar com sessão:', session);
         socket.emit("room:rejoin", {
           roomId: session.roomId,
           sessionId: session.sessionId,
         });
       }
+    });
+
+    // Listener adicional para reconexão (quando socket volta após desconexão)
+    socket.io.on("reconnect", (attemptNumber: number) => {
+      console.log('[useGame] Socket reconectado, tentativa:', attemptNumber);
+      const session = loadSession();
+      if (session) {
+        console.log('[useGame] Tentando reconectar novamente após reconexão do socket:', session);
+        socket.emit("room:rejoin", {
+          roomId: session.roomId,
+          sessionId: session.sessionId,
+        });
+      }
+    });
+
+    // Listener para falha de rejoin
+    socket.on("room:rejoinFailed", ({ message }: { message: string }) => {
+      console.log('[useGame] Rejoin falhou:', message);
+      clearSession();
     });
 
     socket.on(
@@ -83,6 +104,7 @@ export function useGame() {
     );
 
     socket.on("room:sessionInfo", ({ sessionId }: { sessionId?: string }) => {
+      console.log('[useGame] Session info recebido:', sessionId);
       if (sessionId) {
         const session = loadSession();
         // Atualiza sessionId mantendo roomId
@@ -94,17 +116,24 @@ export function useGame() {
       }
     });
 
-    socket.on("room:rejoinFailed", () => {
-      clearSession();
-    });
-
     socket.on("game:stateUpdate", (state: GameState) => {
+      console.log('[useGame] State update recebido:', state.roomId, state.phase);
       setGameState(state);
       setTrickResult(null);
 
       // Atualiza roomId se necessário (para reconnect)
       if (state.roomId && state.roomId !== roomId) {
         setRoomId(state.roomId);
+      }
+
+      // Atualiza sessão com novo roomId e sessionId
+      const me = state.players.find(p => p.id === socket.id);
+      if (me && me.sessionId) {
+        saveSession({
+          roomId: state.roomId,
+          sessionId: me.sessionId,
+          playerName: me.name,
+        });
       }
     });
 
