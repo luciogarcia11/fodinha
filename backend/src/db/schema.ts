@@ -61,6 +61,13 @@ export function initializeDatabase() {
     )
   `);
 
+  // Migration: Add deck_count column if it doesn't exist (for existing databases)
+  try {
+    db.exec(`ALTER TABLE room_configs ADD COLUMN deck_count INTEGER NOT NULL DEFAULT 1`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+
   // Banned players table (persistent across sessions)
   db.exec(`
     CREATE TABLE IF NOT EXISTS banned_players (
