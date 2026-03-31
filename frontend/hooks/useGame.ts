@@ -61,23 +61,13 @@ export function useGame() {
       console.log('[useGame] Socket conectado:', socket.id);
       setMyId(socket.id ?? "");
 
-      // Tentar reconnect com sessão salva
+      // SÓ tenta rejoin se houver sessão salva E estiver na página de lobby/game
+      // NÃO tenta se o usuário saiu voluntariamente
       const session = loadSession();
-      if (session) {
-        console.log('[useGame] Tentando reconectar com sessão:', session);
-        socket.emit("room:rejoin", {
-          roomId: session.roomId,
-          sessionId: session.sessionId,
-        });
-      }
-    });
+      const currentPath = window.location.pathname;
 
-    // Listener adicional para reconexão (quando socket volta após desconexão)
-    socket.io.on("reconnect", (attemptNumber: number) => {
-      console.log('[useGame] Socket reconectado, tentativa:', attemptNumber);
-      const session = loadSession();
-      if (session) {
-        console.log('[useGame] Tentando reconectar novamente após reconexão do socket:', session);
+      if (session && (currentPath === '/lobby' || currentPath === '/game')) {
+        console.log('[useGame] Tentando reconectar com sessão:', session);
         socket.emit("room:rejoin", {
           roomId: session.roomId,
           sessionId: session.sessionId,
@@ -114,6 +104,13 @@ export function useGame() {
           playerName: session?.playerName ?? "",
         });
       }
+    });
+
+    // Listener para ser kickado (limpa sessão imediatamente)
+    socket.on("game:kicked", ({ message }: { message: string }) => {
+      console.log('[useGame] Kickado:', message);
+      setKicked(message);
+      clearSession();
     });
 
     socket.on("game:stateUpdate", (state: GameState) => {
@@ -164,11 +161,6 @@ export function useGame() {
 
     socket.on("game:playerReconnected", ({ playerName }: { playerName: string }) => {
       setPlayerReconnectedName(playerName);
-    });
-
-    socket.on("game:kicked", ({ message }: { message: string }) => {
-      setKicked(message);
-      clearSession();
     });
 
     // Vote-kick events
