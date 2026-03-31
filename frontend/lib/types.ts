@@ -32,6 +32,7 @@ export interface GameConfig {
   suitTiebreakerRule: boolean;
   maxRounds: number;
   isPublic: boolean;
+  deckCount: 1 | 2;  // Número de baralhos (1 ou 2)
 }
 
 export interface ChatMessage {

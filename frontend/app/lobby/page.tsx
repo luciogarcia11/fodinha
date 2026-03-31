@@ -155,6 +155,26 @@ function LobbyContent() {
           </div>
 
           <div className="flex items-center justify-between">
+            <span className="text-sm">Número de Baralhos</span>
+            {isHost ? (
+              <select
+                className="bg-white/20 text-white rounded px-2 py-1 text-sm"
+                value={gameState.config.deckCount}
+                onChange={(e) =>
+                  updateConfig({ deckCount: Number(e.target.value) as 1 | 2 })
+                }
+              >
+                <option value={1} className="text-gray-900">1 baralho (40 cartas)</option>
+                <option value={2} className="text-gray-900">2 baralhos (80 cartas)</option>
+              </select>
+            ) : (
+              <span className="text-yellow-400 font-bold text-sm">
+                {gameState.config.deckCount} {gameState.config.deckCount === 1 ? "baralho" : "baralhos"}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between">
             <span className="text-sm">Sala Pública</span>
             {isHost ? (
               <input
@@ -202,6 +222,14 @@ function LobbyContent() {
           Aguardando o host iniciar o jogo...
         </p>
       )}
+
+      {/* Botão de sair da sala */}
+      <a
+        href="http://fodinhamineira.vercel.app/"
+        className="w-full max-w-sm bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl text-center transition-all shadow-lg flex items-center justify-center gap-2"
+      >
+        🏠 Sair da Sala
+      </a>
     </main>
   );
 }

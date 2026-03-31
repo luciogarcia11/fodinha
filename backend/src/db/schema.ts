@@ -56,6 +56,7 @@ export function initializeDatabase() {
       card_on_forehead_rule INTEGER NOT NULL DEFAULT 1,
       suit_tiebreaker_rule INTEGER NOT NULL DEFAULT 0,
       max_rounds INTEGER NOT NULL DEFAULT 0,
+      deck_count INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
     )
   `);

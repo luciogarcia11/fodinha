@@ -43,8 +43,8 @@ export function saveRoom(state: GameState): void {
   const configStmt = db.prepare(`
     INSERT OR REPLACE INTO room_configs (
       room_id, lives_per_player, fdp_rule, card_on_forehead_rule,
-      suit_tiebreaker_rule, max_rounds
-    ) VALUES (?, ?, ?, ?, ?, ?)
+      suit_tiebreaker_rule, max_rounds, deck_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   configStmt.run(
@@ -53,7 +53,8 @@ export function saveRoom(state: GameState): void {
     state.config.fdpRule ? 1 : 0,
     state.config.cardOnForeheadRule ? 1 : 0,
     state.config.suitTiebreakerRule ? 1 : 0,
-    state.config.maxRounds
+    state.config.maxRounds,
+    state.config.deckCount
   );
 
   // Save players
@@ -99,6 +100,7 @@ export function loadRoom(roomId: string): GameState | null {
     suitTiebreakerRule: !!configRow?.suit_tiebreaker_rule,
     maxRounds: configRow?.max_rounds || 0,
     isPublic: !!room.is_public,
+    deckCount: (configRow?.deck_count || 1) as 1 | 2,
   };
 
   const playersStmt = db.prepare('SELECT * FROM players WHERE room_id = ?');
@@ -157,7 +159,7 @@ export function deleteRoom(roomId: string): void {
   db.prepare('DELETE FROM rooms WHERE id = ?').run(roomId);
 }
 
-// List all public rooms in lobby phase
+// List all public rooms in lobby phase with active players
 export function listPublicRooms(): Array<{
   roomId: string;
   hostName: string;
@@ -175,20 +177,24 @@ export function listPublicRooms(): Array<{
 
   const rows = stmt.all() as any[];
 
-  return rows.map(row => ({
-    roomId: row.id,
-    hostName: row.host_name,
-    playerCount: getPlayerCount(row.id),
-    maxPlayers: 10,
-    config: {
-      livesPerPlayer: row.lives_per_player || 3,
-      fdpRule: !!row.fdp_rule,
-      cardOnForeheadRule: !!row.card_on_forehead_rule,
-      suitTiebreakerRule: !!row.suit_tiebreaker_rule,
-      maxRounds: row.max_rounds || 0,
-      isPublic: true,
-    },
-  }));
+  // Filter out rooms with no players and return only rooms with active players
+  return rows
+    .map(row => ({
+      roomId: row.id,
+      hostName: row.host_name,
+      playerCount: getPlayerCount(row.id),
+      maxPlayers: 10,
+      config: {
+        livesPerPlayer: row.lives_per_player || 3,
+        fdpRule: !!row.fdp_rule,
+        cardOnForeheadRule: !!row.card_on_forehead_rule,
+        suitTiebreakerRule: !!row.suit_tiebreaker_rule,
+        maxRounds: row.max_rounds || 0,
+        isPublic: true,
+        deckCount: (row.deck_count || 1) as 1 | 2,
+      },
+    }))
+    .filter(room => room.playerCount > 0); // Only show rooms with players
 }
 
 function getPlayerCount(roomId: string): number {
@@ -318,11 +324,76 @@ export function updateRoomActivity(roomId: string): void {
   );
 }
 
-// Cleanup inactive rooms (older than 1 hour and in lobby)
+// Cleanup inactive rooms (more aggressive for empty lobbies)
 export function cleanupInactiveRooms(): number {
   const oneHourAgo = Math.floor(Date.now() / 1000) - 3600;
-  const result = db.prepare("DELETE FROM rooms WHERE last_activity < ? AND phase = 'lobby'").run(oneHourAgo);
-  return result.changes;
+  const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300; // 5 minutes
+  
+  // Remove empty lobby rooms older than 5 minutes (more aggressive)
+  const emptyLobbiesStmt = db.prepare(`
+    DELETE FROM rooms 
+    WHERE phase = 'lobby' 
+    AND last_activity < ? 
+    AND id NOT IN (
+      SELECT DISTINCT room_id FROM players WHERE room_id IS NOT NULL
+    )
+  `);
+  const emptyLobbiesResult = emptyLobbiesStmt.run(fiveMinutesAgo);
+  
+  // Remove lobby rooms with only 1 player (host) older than 15 minutes
+  const singlePlayerStmt = db.prepare(`
+    DELETE FROM rooms 
+    WHERE phase = 'lobby' 
+    AND last_activity < ? 
+    AND id IN (
+      SELECT room_id FROM players 
+      WHERE room_id IS NOT NULL 
+      GROUP BY room_id 
+      HAVING COUNT(*) = 1
+    )
+  `);
+  const singlePlayerResult = singlePlayerStmt.run(Math.floor(Date.now() / 1000) - 900); // 15 minutes
+  
+  // Remove other inactive rooms older than 1 hour
+  const inactiveStmt = db.prepare(`
+    DELETE FROM rooms 
+    WHERE last_activity < ? 
+    AND phase = 'lobby'
+    AND id IN (
+      SELECT room_id FROM players 
+      WHERE room_id IS NOT NULL 
+      GROUP BY room_id 
+      HAVING COUNT(*) > 1
+    )
+  `);
+  const inactiveResult = inactiveStmt.run(oneHourAgo);
+  
+  // Remove salas que terminaram o jogo (game_over) após 5 minutos
+  const gameOverStmt = db.prepare(`
+    DELETE FROM rooms 
+    WHERE phase = 'game_over' 
+    AND last_activity < ?
+  `);
+  const gameOverResult = gameOverStmt.run(fiveMinutesAgo);
+  
+  // Remove salas em outras fases (betting, playing, round_end) sem jogadores conectados após 15 minutos
+  const otherPhasesStmt = db.prepare(`
+    DELETE FROM rooms 
+    WHERE phase IN ('betting', 'playing', 'round_end')
+    AND last_activity < ?
+    AND id NOT IN (
+      SELECT DISTINCT room_id FROM players WHERE room_id IS NOT NULL AND connected = 1
+    )
+  `);
+  const otherPhasesResult = otherPhasesStmt.run(Math.floor(Date.now() / 1000) - 900); // 15 minutos
+  
+  const totalChanges = emptyLobbiesResult.changes + singlePlayerResult.changes + inactiveResult.changes + gameOverResult.changes + otherPhasesResult.changes;
+  
+  if (totalChanges > 0) {
+    console.log(`🧹 Salas inativas removidas: ${emptyLobbiesResult.changes} lobbies vazios + ${singlePlayerResult.changes} lobbies com 1 jogador + ${inactiveResult.changes} lobbies antigos + ${gameOverResult.changes} game_over + ${otherPhasesResult.changes} outras fases = ${totalChanges} total`);
+  }
+  
+  return totalChanges;
 }
 
 // Get room last activity timestamp

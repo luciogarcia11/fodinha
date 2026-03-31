@@ -99,12 +99,12 @@ export default function RoomsPage() {
         )}
       </div>
 
-      <button
-        onClick={() => router.push("/")}
+      <a
+        href="http://fodinhamineira.vercel.app/"
         className="text-white/40 hover:text-white text-sm transition-colors mt-4"
       >
         ← Voltar ao início
-      </button>
+      </a>
     </main>
   );
 }

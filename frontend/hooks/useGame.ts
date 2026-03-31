@@ -50,7 +50,7 @@ export function useGame() {
   const [voteUpdate, setVoteUpdate] = useState<VoteUpdateData | null>(null);
   const [voteComplete, setVoteComplete] = useState<{ targetName: string } | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [globalChatMessages, setGlobalChatMessages] = useState<any[]>([]);
+  const [globalChatMessages, setGlobalChatMessages] = useState<ChatMessage[]>([]);
   const [reactions, setReactions] = useState<Reaction[]>([]);
   const [publicRooms, setPublicRooms] = useState<PublicRoomInfo[]>([]);
 
@@ -195,7 +195,7 @@ export function useGame() {
       setPublicRooms(rooms);
     });
 
-    socket.on("global:chat", (message: any) => {
+    socket.on("global:chat", (message: ChatMessage) => {
       setGlobalChatMessages(prev => {
         const next = [...prev, message];
         return next.length > 50 ? next.slice(-50) : next;
@@ -232,7 +232,7 @@ export function useGame() {
       socket.off("global:chat");
       socket.off("reaction:new");
     };
-  }, []);
+  }, [roomId]);
 
   // Attempt to notify server on tab/window close so the room updates immediately.
   useEffect(() => {

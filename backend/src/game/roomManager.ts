@@ -38,6 +38,9 @@ function generateSessionId(): string {
 }
 
 export function createRoom(hostId: string, hostName: string): GameState {
+  // Cleanup old rooms before creating new one to prevent accumulation
+  cleanupEmptyRooms();
+  
   const roomId = generateRoomCode();
   const config: GameConfig = {
     livesPerPlayer: 3,
@@ -46,6 +49,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
     suitTiebreakerRule: false,
     maxRounds: 0,
     isPublic: true,
+    deckCount: 1,  // Padrão: 1 baralho
   };
 
   const host: Player = {
@@ -176,11 +180,9 @@ export function startGame(roomId: string): GameState | null {
   if (!state || state.players.length < 2) return null;
 
   const playerCount = Math.max(1, state.players.length);
-  if (state.config.fdpRule) {
-    state.config.maxRounds = Math.floor(80 / playerCount);
-  } else {
-    state.config.maxRounds = Math.floor(40 / playerCount);
-  }
+  // Calcula maxRounds baseado no número de baralhos
+  const totalCards = state.config.deckCount === 2 ? 80 : 40;
+  state.config.maxRounds = Math.floor(totalCards / playerCount);
 
   state.players.forEach(p => {
     p.lives = state.config.livesPerPlayer;
@@ -201,8 +203,8 @@ export function dealRound(state: GameState): GameState {
 
   const activePlayers = state.players.filter(p => !p.isEliminated);
 
-  // Usa multi-deck se FDP ativo
-  const deck = state.config.fdpRule
+  // Usa múltiplos baralhos baseado na configuração
+  const deck = state.config.deckCount === 2
     ? shuffleDeck(buildMultiDeck())
     : shuffleDeck(buildDeck('blue'));
   const hands = dealCards(deck, activePlayers.length, cardsThisRound);
@@ -211,13 +213,13 @@ export function dealRound(state: GameState): GameState {
     p.hand = hands[i];
   });
 
-  // Sentido anti-horário: a partir do dealer, decrementa índices
+  // Sentido anti-horário: a partir do dealer, incrementa índices (para a esquerda)
   const dealerIdx = state.dealerIndex % activePlayers.length;
-  const firstBetIdx = (dealerIdx - 1 + activePlayers.length) % activePlayers.length;
+  const firstBetIdx = (dealerIdx + 1) % activePlayers.length;
 
   const bettingOrder: string[] = [];
   for (let i = 0; i < activePlayers.length; i++) {
-    const idx = (firstBetIdx - i + activePlayers.length) % activePlayers.length;
+    const idx = (firstBetIdx + i) % activePlayers.length;
     bettingOrder.push(activePlayers[idx].id);
   }
 
@@ -309,12 +311,24 @@ export function disconnectPlayer(
     }, 30000);
     disconnectTimers.set(player.sessionId, timer);
   } else {
+    // No lobby: remove jogador imediatamente
     state.players = state.players.filter(p => p.id !== playerId);
+    
+    // Se era o host e é o último jogador no lobby, deleta a sala
+    if (playerId === state.hostId && state.players.length === 0) {
+      console.log(`🗑️ Deletando sala ${roomId} - host saiu e sala ficou vazia`);
+      rooms.delete(roomId);
+      deleteRoomDB(roomId);
+      return null; // Indica que a sala foi deletada
+    }
   }
 
   if (playerId === state.hostId) {
     const nextHost = state.players.find(p => p.connected && !p.isEliminated);
-    if (nextHost) state.hostId = nextHost.id;
+    if (nextHost) {
+      state.hostId = nextHost.id;
+      state.hostName = nextHost.name;
+    }
   }
 
   return state;

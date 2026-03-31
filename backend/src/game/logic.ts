@@ -42,74 +42,44 @@ function resolveVazaStandard(trick: PlayedCard[], suitTiebreakerRule: boolean): 
 }
 
 /**
- * Resolve vaza no modo FDP com amarração.
- * Processa cartas na ordem em que foram jogadas.
- * Cartas iguais se anulam (amarram), voltando a valer a maior anterior.
+ * Resolve vaza no modo FDP.
+ * Separa manilhas e comuns.
+ * Anula TODAS as cartas comuns de mesmo valor (se houver 2 ou mais).
+ * Manilhas nunca se anulam.
  */
 function resolveVazaFDP(trick: PlayedCard[], suitTiebreakerRule: boolean): string | null {
-  // Stack de cartas "vivas" — quando uma carta amarra com a atual vencedora,
-  // ambas são removidas e a anterior volta a valer.
-  // Cada entrada: { playerId, card, strength_effective }
-  interface LiveCard {
-    playerId: string;
-    card: typeof trick[0]['card'];
+  // Separa manilhas e comuns
+  const manilhas = trick.filter(p => p.card.isManilha);
+  const comuns = trick.filter(p => !p.card.isManilha);
+
+  // Conta quantas vezes cada valor aparece entre as cartas comuns
+  const valueCounts: Record<string, number> = {};
+  for (const p of comuns) {
+    valueCounts[p.card.value] = (valueCounts[p.card.value] ?? 0) + 1;
   }
 
-  const liveCards: LiveCard[] = [];
+  // Mantém apenas as cartas comuns que aparecem uma única vez
+  const comunsRestantes = comuns.filter(p => valueCounts[p.card.value] === 1);
 
-  for (const played of trick) {
-    const { card } = played;
+  // Candidatos finais: manilhas + comuns não anuladas
+  const candidates = [...manilhas, ...comunsRestantes];
 
-    // Verifica se essa carta amarra com alguma carta viva
-    const matchIndex = liveCards.findIndex(lc => cardsMatch(lc.card, card, suitTiebreakerRule));
+  if (candidates.length === 0) return null;
 
-    if (matchIndex !== -1) {
-      // Amarração! Remove a carta que amarrou
-      liveCards.splice(matchIndex, 1);
-      // A carta atual também é anulada (não entra no liveCards)
-    } else {
-      liveCards.push({ playerId: played.playerId, card });
-    }
-  }
-
-  if (liveCards.length === 0) return null;
-
-  // Encontra a carta mais forte entre as sobreviventes
-  const maxStrength = Math.max(...liveCards.map(lc => lc.card.strength));
-  const winners = liveCards.filter(lc => lc.card.strength === maxStrength);
+  // Encontra a maior força
+  const maxStrength = Math.max(...candidates.map(p => p.card.strength));
+  const winners = candidates.filter(p => p.card.strength === maxStrength);
 
   if (winners.length === 1) return winners[0].playerId;
 
-  // Empate entre sobreviventes — desempate por naipe
+  // Empate entre os mais fortes
   if (suitTiebreakerRule) {
-    const maxSuit = Math.max(...winners.map(lc => SUIT_STRENGTH[lc.card.suit]));
-    const suitWinners = winners.filter(lc => SUIT_STRENGTH[lc.card.suit] === maxSuit);
+    const maxSuit = Math.max(...winners.map(p => SUIT_STRENGTH[p.card.suit]));
+    const suitWinners = winners.filter(p => SUIT_STRENGTH[p.card.suit] === maxSuit);
     if (suitWinners.length === 1) return suitWinners[0].playerId;
   }
 
   return null;
-}
-
-/**
- * Verifica se duas cartas "amarram" (se anulam).
- * FDP sem suit tiebreaker: mesmo valor entre comuns (manilhas nunca amarram)
- * FDP com suit tiebreaker: mesmo valor E mesmo naipe (cartas idênticas)
- */
-function cardsMatch(
-  a: { value: string; suit: string; isManilha: boolean; strength: number },
-  b: { value: string; suit: string; isManilha: boolean; strength: number },
-  suitTiebreakerRule: boolean
-): boolean {
-  // Manilhas nunca se anulam entre si
-  if (a.isManilha || b.isManilha) return false;
-
-  if (suitTiebreakerRule) {
-    // Com desempate por naipe, só amarra se for carta idêntica (mesmo valor E naipe)
-    return a.value === b.value && a.suit === b.suit;
-  }
-
-  // Sem desempate por naipe, amarra se mesmo valor
-  return a.value === b.value;
 }
 
 /**
@@ -173,31 +143,29 @@ function calculateTrickStateStandard(trick: PlayedCard[], suitTiebreakerRule: bo
 }
 
 function calculateTrickStateFDP(trick: PlayedCard[], suitTiebreakerRule: boolean): TrickState {
-  interface LiveCard {
-    playerId: string;
-    card: typeof trick[0]['card'];
+  // Separa manilhas e comuns
+  const manilhas = trick.filter(p => p.card.isManilha);
+  const comuns = trick.filter(p => !p.card.isManilha);
+
+  // Conta quantas vezes cada valor aparece entre as cartas comuns
+  const valueCounts: Record<string, number> = {};
+  for (const p of comuns) {
+    valueCounts[p.card.value] = (valueCounts[p.card.value] ?? 0) + 1;
   }
 
-  const liveCards: LiveCard[] = [];
-  let lastStrongPlayerId: string | null = null;
+  // Mantém apenas as cartas comuns que aparecem uma única vez
+  const comunsRestantes = comuns.filter(p => valueCounts[p.card.value] === 1);
 
-  for (const played of trick) {
-    const { card } = played;
-    const matchIndex = liveCards.findIndex(lc => cardsMatch(lc.card, card, suitTiebreakerRule));
+  // Candidatos finais: manilhas + comuns não anuladas
+  const candidates = [...manilhas, ...comunsRestantes];
 
-    if (matchIndex !== -1) {
-      liveCards.splice(matchIndex, 1);
-    } else {
-      liveCards.push({ playerId: played.playerId, card });
-    }
-  }
-
-  if (liveCards.length === 0) {
+  if (candidates.length === 0) {
     return { winningCardPlayerId: null, isTied: true, lastStrongCardPlayerId: null };
   }
 
-  const maxStrength = Math.max(...liveCards.map(lc => lc.card.strength));
-  const winners = liveCards.filter(lc => lc.card.strength === maxStrength);
+  // Encontra a maior força
+  const maxStrength = Math.max(...candidates.map(p => p.card.strength));
+  const winners = candidates.filter(p => p.card.strength === maxStrength);
 
   if (winners.length === 1) {
     return {
@@ -207,9 +175,10 @@ function calculateTrickStateFDP(trick: PlayedCard[], suitTiebreakerRule: boolean
     };
   }
 
+  // Empate entre os mais fortes
   if (suitTiebreakerRule) {
-    const maxSuit = Math.max(...winners.map(lc => SUIT_STRENGTH[lc.card.suit]));
-    const suitWinners = winners.filter(lc => SUIT_STRENGTH[lc.card.suit] === maxSuit);
+    const maxSuit = Math.max(...winners.map(p => SUIT_STRENGTH[p.card.suit]));
+    const suitWinners = winners.filter(p => SUIT_STRENGTH[p.card.suit] === maxSuit);
     if (suitWinners.length === 1) {
       return {
         winningCardPlayerId: suitWinners[0].playerId,
@@ -222,7 +191,7 @@ function calculateTrickStateFDP(trick: PlayedCard[], suitTiebreakerRule: boolean
   return {
     winningCardPlayerId: null,
     isTied: true,
-    lastStrongCardPlayerId: liveCards.length > 0 ? liveCards[0].playerId : null,
+    lastStrongCardPlayerId: null,
   };
 }
 

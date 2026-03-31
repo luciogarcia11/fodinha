@@ -47,8 +47,15 @@ import {
   validateSessionId,
 } from "./middleware/validation";
 
+// Environment variables
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const corsOrigins = CORS_ORIGIN === "*" ? "*" : CORS_ORIGIN.split(",").map(url => url.trim());
+
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: corsOrigins,
+  credentials: true,
+}));
 app.use(express.json({ limit: '10kb' }));
 
 const httpServer = createServer(app);
@@ -62,315 +69,28 @@ setInterval(() => {
   cleanupExpiredRateLimits();
   cleanupOldReactions();
 }, 60000);
+
+// More frequent cleanup of empty rooms (every 15 seconds)
+setInterval(() => {
+  cleanupInactiveRooms();
+}, 15000);
+
 const io = new Server(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
+  cors: { 
+    origin: corsOrigins,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
 });
 
-app.get("/health", (_, res) => res.json({ ok: true }));
-
-// REST: listar salas públicas
-app.get("/api/rooms", (_, res) => {
-  res.json(listPublicRooms());
-});
-
-// REST: chat global (lobby)
-app.get("/api/chat/global", (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-  res.json(getGlobalChatMessages(limit));
-});
-
-// REST: enviar mensagem no chat global
-app.post("/api/chat/global", (req, res) => {
-  const { playerId, playerName, text } = req.body;
-
-  // Validation
-  if (!playerId || !playerName || !text) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-
-  if (typeof text !== 'string' || text.length > 200) {
-    return res.status(400).json({ error: 'Invalid message length' });
-  }
-
-  if (playerName.length > 16) {
-    return res.status(400).json({ error: 'Invalid player name length' });
-  }
-
-  // Sanitize
-  const sanitized = text
-    .replace(/[<>]/g, c => ({ '<': '&lt;', '>': '&gt;' }[c] ?? c))
-    .trim()
-    .slice(0, 200);
-
-  if (!sanitized) {
-    return res.status(400).json({ error: 'Empty message' });
-  }
-
-  const message = addGlobalChatMessage(playerId, playerName, sanitized);
-  io.emit('global:chat', message);
-  res.json({ success: true, message });
-});
-
-// REST: reações de sala
-app.get("/api/rooms/:roomId/reactions", (req, res) => {
-  const { roomId } = req.params;
-  res.json(getRoomReactions(roomId));
-});
-
-// ===== ADMIN ENDPOINTS =====
-
-// Basic authentication middleware
-function basicAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    res.setHeader('WWW-Authenticate', 'Basic');
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-
-  const encoded = authHeader.split(' ')[1];
-  const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
-  const [username, password] = decoded.split(':');
-
-  if (username !== 'admin' || password !== 'secret123') {
-    return res.status(403).json({ error: 'Invalid credentials' });
-  }
-
-  next();
-}
-
-// POST: Limpar salas vazias manualmente
-app.post("/api/admin/cleanup-rooms", basicAuth, (req, res) => {
-  try {
-    console.log('🔧 Iniciando limpeza manual de salas vazias...');
-    const result = cleanupEmptyRooms();
-    console.log(`✅ Limpeza concluída: ${result.removedCount} salas removidas`);
-
-    res.json({
-      success: true,
-      removedCount: result.removedCount,
-      details: result.details,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('❌ Erro na limpeza de salas:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-// POST: Forçar limpeza imediata (mais agressiva)
-app.post("/api/admin/force-cleanup", basicAuth, (req, res) => {
-  try {
-    console.log('🔧 Iniciando limpeza forçada de salas...');
-    const result = cleanupEmptyRooms();
-
-    // Additional aggressive cleanup: remove rooms inactive for more than 1 hour
-    const inactiveRemoved = cleanupInactiveRooms();
-
-    const totalRemoved = result.removedCount + inactiveRemoved;
-
-    console.log(`✅ Limpeza forçada concluída: ${result.removedCount} salas vazias + ${inactiveRemoved} salas inativas = ${totalRemoved} total`);
-
-    res.json({
-      success: true,
-      emptyRoomsRemoved: result.removedCount,
-      inactiveRoomsRemoved: inactiveRemoved,
-      totalRemoved,
-      emptyRoomDetails: result.details,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('❌ Erro na limpeza forçada:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-// GET: Status das salas (admin)
-app.get("/api/admin/rooms-status", basicAuth, (req, res) => {
-  try {
-    const allRooms = getAllRooms();
-    const roomsStatus = Array.from(allRooms.values()).map(room => ({
-      roomId: room.roomId,
-      phase: room.phase,
-      playerCount: room.players.length,
-      connectedCount: room.players.filter(p => p.connected).length,
-      hostName: room.hostName,
-      round: room.round,
-      isPublic: room.config.isPublic,
-      chatMessagesCount: room.chatMessages.length,
-    }));
-
-    res.json({
-      success: true,
-      totalRooms: roomsStatus.length,
-      rooms: roomsStatus,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('❌ Erro ao obter status das salas:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-// GET: Verificar estado do chat de uma sala no banco de dados (admin)
-app.get("/api/admin/room/:roomId/chat", basicAuth, (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const { loadRoom } = require('./db/rooms');
-    const room = loadRoom(roomId);
-
-    if (!room) {
-      return res.status(404).json({
-        error: 'Room not found',
-        message: `Sala ${roomId} não encontrada no banco de dados`
-      });
-    }
-
-    res.json({
-      success: true,
-      roomId,
-      chatMessages: room.chatMessages,
-      chatMessagesCount: room.chatMessages.length,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('❌ Erro ao obter chat da sala:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-// DELETE: Limpar mensagens antigas de uma sala (admin)
-app.delete("/api/admin/room/:roomId/chat/old", basicAuth, (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const days = parseInt(req.query.days as string) || 7; // Default: 7 days
-    const seconds = days * 24 * 60 * 60;
-    const cutoffTime = Math.floor(Date.now() / 1000) - seconds;
-
-    const db = require('./db/schema').db;
-
-    // Delete old messages
-    const result = db.prepare(`
-      DELETE FROM room_chat
-      WHERE room_id = ? AND timestamp < ?
-    `).run(roomId, cutoffTime);
-
-    console.log(`[Admin] Limpando mensagens antigas da sala ${roomId}: ${result.changes} mensagens removidas`);
-
-    res.json({
-      success: true,
-      roomId,
-      messagesDeleted: result.changes,
-      cutoffDate: new Date(cutoffTime * 1000).toISOString(),
-      days,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('❌ Erro ao limpar mensagens antigas:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-// DELETE: Limpar todas as mensagens de uma sala (admin)
-app.delete("/api/admin/room/:roomId/chat/all", basicAuth, (req, res) => {
-  try {
-    const roomIdParam = req.params.roomId;
-    // Ensure roomId is a string (Express may return array)
-    const roomId = Array.isArray(roomIdParam) ? roomIdParam[0] : roomIdParam;
-
-    const db = require('./db/schema').db;
-
-    // Delete all messages
-    const result = db.prepare('DELETE FROM room_chat WHERE room_id = ?').run(roomId);
-
-    console.log(`[Admin] Limpando todas as mensagens da sala ${roomId}: ${result.changes} mensagens removidas`);
-
-    // Also clear in-memory cache
-    const state = getRoom(roomId);
-    if (state) {
-      const previousCount = state.chatMessages.length;
-      state.chatMessages = [];
-      console.log(`[Admin] Cache em memória limpo: ${previousCount} mensagens removidas`);
-    }
-
-    res.json({
-      success: true,
-      roomId,
-      messagesDeleted: result.changes,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('❌ Erro ao limpar todas as mensagens:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-// POST: Recarregar sala do banco de dados para sincronizar cache (admin)
-app.post("/api/admin/room/:roomId/reload", basicAuth, (req, res) => {
-  try {
-    const roomIdParam = req.params.roomId;
-    // Ensure roomId is a string (Express may return array)
-    const roomId = Array.isArray(roomIdParam) ? roomIdParam[0] : roomIdParam;
-
-    const { loadRoom } = require('./db/rooms');
-
-    const room = loadRoom(roomId);
-    if (!room) {
-      return res.status(404).json({
-        error: 'Room not found',
-        message: `Sala ${roomId} não encontrada no banco de dados`
-      });
-    }
-
-    // Update in-memory cache
-    updateRoomInCache(roomId, room);
-
-    const previousChatCount = getRoom(roomId)?.chatMessages.length || 0;
-
-    console.log(`[Admin] Sala ${roomId} recarregada do banco - chatMessages: ${room.chatMessages.length}`);
-
-    res.json({
-      success: true,
-      roomId,
-      chatMessages: room.chatMessages,
-      chatMessagesCount: room.chatMessages.length,
-      previousChatCount,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('❌ Erro ao recarregar sala:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-// Cleanup de salas vazias periódico (a cada 60s)
-setInterval(() => cleanupEmptyRooms(), 60000);
+// Cleanup de salas vazias periódico (a cada 30s)
+setInterval(() => cleanupEmptyRooms(), 30000);
 
 // Timers de vote-kick (roomId → timeout)
 const voteKickTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * Obtém o próximo jogador na ordem de jogo (sentido anti-horário).
+ * Obtém o próximo jogador na ordem de jogo (sentido horário = direita).
  * Usa bettingOrder como referência de ordem.
  */
 function getNextPlayer(state: { bettingOrder: string[]; players: { id: string; isEliminated: boolean }[] }, currentPlayerId: string): string {
@@ -378,6 +98,7 @@ function getNextPlayer(state: { bettingOrder: string[]; players: { id: string; i
     id => !state.players.find(p => p.id === id)?.isEliminated
   );
   const idx = activeOrder.indexOf(currentPlayerId);
+  // Sentido horário: vai para o próximo na lista (esquerda para direita)
   return activeOrder[(idx + 1) % activeOrder.length];
 }
 
@@ -496,6 +217,12 @@ io.on("connection", (socket) => {
   // ===== ROOM:CREATE =====
   socket.on("room:create", ({ name }: { name: string }) => {
     try {
+      // Rate limiting: 1 sala por minuto por IP/socket
+      if (!checkRateLimit(socket.id, undefined, 'create_room', 1, 60)) {
+        socket.emit("room:error", { message: "Aguarde 1 minuto antes de criar outra sala." });
+        return;
+      }
+
       const validatedName = validatePlayerName(name);
       const state = createRoom(socket.id, validatedName);
       socket.join(state.roomId);
@@ -628,6 +355,10 @@ io.on("connection", (socket) => {
       if (!state || state.phase !== "playing") return;
       if (state.currentTurn !== socket.id) return;
       if (state.resolvingTrick) return;
+      
+      // Verifica se o jogador já jogou nesta vaza
+      const alreadyPlayed = state.currentTrick.some(trick => trick.playerId === socket.id);
+      if (alreadyPlayed) return;
 
       const player = state.players.find((p) => p.id === socket.id);
       if (!player || cardIndex < 0 || cardIndex >= player.hand.length) return;
@@ -684,11 +415,14 @@ io.on("connection", (socket) => {
 
               state.players = [...state.players];
 
+              // Filtra apenas jogadores que não foram eliminados nesta rodada
+              const playersToShow = state.players.filter(p => !eliminated.includes(p.id));
+              
               io.to(roomId).emit("game:roundEnd", {
                 bets: state.bets,
                 tricksTaken: state.tricksTaken,
                 eliminated,
-                players: state.players,
+                players: playersToShow,
               });
 
               io.to(roomId).emit("game:stateUpdate", state);

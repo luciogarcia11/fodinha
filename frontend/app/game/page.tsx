@@ -39,8 +39,6 @@ function GameContent() {
     clearVoteComplete,
     chatMessages,
     sendChat,
-    sendReaction,
-    reactions,
   } = useGameContext();
 
   const router = useRouter();
@@ -57,9 +55,13 @@ function GameContent() {
   const [showRules, setShowRules] = useState(false);
   const [showQuit, setShowQuit] = useState(false);
   const [hideMyCards, setHideMyCards] = useState(false);
-  const [showVoteKickTarget, setShowVoteKickTarget] = useState<string | null>(null);
+  const [showVoteKickTarget, setShowVoteKickTarget] = useState<string | null>(
+    null,
+  );
   const [trickResultVisible, setTrickResultVisible] = useState<boolean>(false);
-  const [prevTrickResult, setPrevTrickResult] = useState<TrickResult | null>(null);
+  const [prevTrickResult, setPrevTrickResult] = useState<TrickResult | null>(
+    null,
+  );
 
   if (trickResult !== prevTrickResult) {
     setPrevTrickResult(trickResult);
@@ -120,7 +122,7 @@ function GameContent() {
       }, 3000);
       return () => clearTimeout(t);
     }
-  }, [kicked]);
+  }, [kicked, router]);
 
   if (!gameState) {
     return (
@@ -134,12 +136,16 @@ function GameContent() {
     const winner = gameState.players.find((p) => p.id === winnerId);
     return (
       <main className="min-h-screen flex flex-col items-center justify-center gap-6">
-        <h1 className="text-4xl md:text-5xl font-black text-yellow-400">🏆 Fim de Jogo!</h1>
+        <h1 className="text-4xl md:text-5xl font-black text-yellow-400">
+          🏆 Fim de Jogo!
+        </h1>
         <p className="text-xl md:text-2xl text-white">
           {winner?.id === myId ? "🎉 Você venceu!" : `${winner?.name} venceu!`}
         </p>
         <button
-          onClick={() => router.push("/")}
+          onClick={() => {
+            window.location.href = "/";
+          }}
           className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 px-8 rounded-xl text-lg"
         >
           Voltar ao início
@@ -183,13 +189,17 @@ function GameContent() {
 
   const bettingIdx = gameState.bettingOrder.indexOf(myId);
   const isLastBetter = bettingIdx === gameState.bettingOrder.length - 1;
-  const currentBetSum = Object.values(gameState.bets).reduce((a, b) => a + b, 0);
+  const currentBetSum = Object.values(gameState.bets).reduce(
+    (a, b) => a + b,
+    0,
+  );
   const forbiddenBet =
     isLastBetter && gameState.cardsThisRound > 1
       ? gameState.cardsThisRound - currentBetSum
       : -1;
 
-  const dealerPlayer = activePlayers[gameState.dealerIndex % activePlayers.length];
+  const dealerPlayer =
+    activePlayers[gameState.dealerIndex % activePlayers.length];
 
   function handleCardClick(idx: number) {
     if (!gameState || !isMyTurn || gameState.phase !== "playing") return;
@@ -203,14 +213,18 @@ function GameContent() {
 
   function renderLives(lives: number, max: number) {
     return Array.from({ length: max }).map((_, i) => (
-      <span key={i} className={i < lives ? "text-red-500" : "text-white/20"}>♥</span>
+      <span key={i} className={i < lives ? "text-red-500" : "text-white/20"}>
+        ♥
+      </span>
     ));
   }
 
   function PlayerSlot({ player }: { player: Player }) {
     const isActive = gameState!.currentTurn === player.id;
     const isDealer = dealerPlayer?.id === player.id;
-    const cardOnTable = gameState!.currentTrick.find((t) => t.playerId === player.id);
+    const cardOnTable = gameState!.currentTrick.find(
+      (t) => t.playerId === player.id,
+    );
     const bet = gameState!.bets[player.id];
     const taken = gameState!.tricksTaken[player.id] ?? 0;
     const showOtherCards = isCardOnForehead && !player.isEliminated;
@@ -219,16 +233,26 @@ function GameContent() {
     const showControls = showVoteKickTarget === player.id;
 
     return (
-      <div className={`flex flex-col items-center gap-1 p-1.5 md:p-2 rounded-xl transition-all
+      <div
+        className={`flex flex-col items-center gap-1 p-1.5 md:p-2 rounded-xl transition-all
         min-w-[60px] md:min-w-[80px] max-w-[80px] md:max-w-[100px]
         ${isActive ? "bg-yellow-400/20 ring-2 ring-yellow-400" : "bg-white/5"}
         ${player.isEliminated ? "opacity-40" : ""}
-      `}>
+      `}
+      >
         <div className="flex items-center gap-0.5">
-          {isDealer && <span className="text-[10px] md:text-xs" title="Pé">🦶</span>}
+          {isDealer && (
+            <span className="text-[10px] md:text-xs" title="Pé">
+              🦶
+            </span>
+          )}
           <span
             className="text-[10px] md:text-xs font-bold text-white/80 truncate max-w-[60px] md:max-w-[80px] cursor-pointer"
-            onClick={() => !isMe && !player.isEliminated && setShowVoteKickTarget(showControls ? null : player.id)}
+            onClick={() =>
+              !isMe &&
+              !player.isEliminated &&
+              setShowVoteKickTarget(showControls ? null : player.id)
+            }
           >
             {player.name}
           </span>
@@ -258,7 +282,10 @@ function GameContent() {
         {showControls && !isMe && !player.isEliminated && (
           <div className="flex flex-col gap-1 mt-1">
             <button
-              onClick={() => { initiateVoteKick(player.id); setShowVoteKickTarget(null); }}
+              onClick={() => {
+                initiateVoteKick(player.id);
+                setShowVoteKickTarget(null);
+              }}
               className="text-[9px] md:text-[10px] bg-purple-700/60 hover:bg-purple-700 text-white px-2 py-0.5 rounded"
             >
               🗳️ Votar kick
@@ -266,13 +293,19 @@ function GameContent() {
             {isHost && (
               <>
                 <button
-                  onClick={() => { hostKick(player.id); setShowVoteKickTarget(null); }}
+                  onClick={() => {
+                    hostKick(player.id);
+                    setShowVoteKickTarget(null);
+                  }}
                   className="text-[9px] md:text-[10px] bg-red-700/60 hover:bg-red-700 text-white px-2 py-0.5 rounded"
                 >
                   🚪 Kick
                 </button>
                 <button
-                  onClick={() => { hostBan(player.id); setShowVoteKickTarget(null); }}
+                  onClick={() => {
+                    hostBan(player.id);
+                    setShowVoteKickTarget(null);
+                  }}
                   className="text-[9px] md:text-[10px] bg-red-900/60 hover:bg-red-900 text-white px-2 py-0.5 rounded"
                 >
                   ⛔ Ban
@@ -288,13 +321,16 @@ function GameContent() {
   // Calcula posições absolutas dos jogadores ao redor da mesa.
   // Ângulos: -120° (esquerda) a +120° (direita), passando por 0° (topo).
   // O jogador na posição 0 da lista fica na esquerda (próximo a jogar).
-  function getPlayerPositions(count: number): { top: string; left: string; transform: string }[] {
+  function getPlayerPositions(
+    count: number,
+  ): { top: string; left: string; transform: string }[] {
     if (count === 0) return [];
     const positions: { top: string; left: string; transform: string }[] = [];
     const startDeg = -120;
     const endDeg = 120;
     for (let i = 0; i < count; i++) {
-      const deg = count === 1 ? 0 : startDeg + (i * (endDeg - startDeg)) / (count - 1);
+      const deg =
+        count === 1 ? 0 : startDeg + (i * (endDeg - startDeg)) / (count - 1);
       const rad = (deg * Math.PI) / 180;
       // Elipse: rx=42% da largura, ry=40% da altura, centrado em 50%/50%
       const rx = 42;
@@ -314,10 +350,11 @@ function GameContent() {
 
   return (
     <main className="min-h-screen flex flex-col relative overflow-hidden select-none">
-
       {/* Header */}
       <div className="flex items-center justify-between px-3 md:px-4 py-2 bg-black/30 shrink-0">
-        <span className="font-bold text-yellow-400 text-xs md:text-sm">🃏 Fodinha</span>
+        <span className="font-bold text-yellow-400 text-xs md:text-sm">
+          🃏 Fodinha
+        </span>
         <div className="flex flex-col items-center">
           <span className="text-white text-xs md:text-sm font-bold">
             Rodada {gameState.round} — {gameState.cardsThisRound} carta
@@ -329,37 +366,46 @@ function GameContent() {
             </span>
           )}
         </div>
-        <span className="text-white/40 text-[10px] md:text-xs font-mono">{roomCode}</span>
+        <span className="text-white/40 text-[10px] md:text-xs font-mono">
+          {roomCode}
+        </span>
       </div>
 
       {/* Área da mesa — posição relativa para os jogadores absolutos */}
       <div className="flex-1 relative min-h-0">
-
         {/* Jogadores ao redor da mesa (posicionados absolutamente) */}
         {others.map((p, i) => (
-          <div
-            key={p.id}
-            className="absolute z-10"
-            style={otherPositions[i]}
-          >
+          <div key={p.id} className="absolute z-10" style={otherPositions[i]}>
             <PlayerSlot player={p} />
           </div>
         ))}
 
         {/* Centro da mesa */}
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 md:gap-3 px-2 md:px-4 pointer-events-none">
-
           {/* Cartas na mesa */}
-          <div className="flex gap-2 md:gap-3 flex-wrap justify-center min-h-20 md:min-h-24 items-center
-            bg-green-900/40 rounded-2xl px-4 md:px-6 py-3 md:py-4 max-w-xs md:max-w-sm border border-green-700/30 pointer-events-auto">
+          <div
+            className="flex gap-2 md:gap-3 flex-wrap justify-center min-h-20 md:min-h-24 items-center
+            bg-green-900/40 rounded-2xl px-4 md:px-6 py-3 md:py-4 max-w-xs md:max-w-sm border border-green-700/30 pointer-events-auto"
+          >
             {gameState.currentTrick.length > 0 ? (
               gameState.currentTrick.map((t) => {
                 const ts = gameState.trickState;
-                const isWinning = ts ? ts.winningCardPlayerId === t.playerId && !ts.isTied : false;
-                const isTied = ts ? ts.isTied && ts.winningCardPlayerId === t.playerId : false;
+                const isWinning = ts
+                  ? ts.winningCardPlayerId === t.playerId && !ts.isTied
+                  : false;
+                const isTied = ts
+                  ? ts.isTied && ts.winningCardPlayerId === t.playerId
+                  : false;
                 return (
-                  <div key={t.playerId} className="flex flex-col items-center gap-1">
-                    <CardComponent card={t.card} isWinning={isWinning} isTied={isTied} />
+                  <div
+                    key={t.playerId}
+                    className="flex flex-col items-center gap-1"
+                  >
+                    <CardComponent
+                      card={t.card}
+                      isWinning={isWinning}
+                      isTied={isTied}
+                    />
                     <span className="text-[10px] md:text-xs text-white/50">
                       {gameState.players.find((p) => p.id === t.playerId)?.name}
                     </span>
@@ -398,8 +444,10 @@ function GameContent() {
 
           {/* Indicador de turno */}
           {gameState.phase === "playing" && (
-            <div className={`rounded-xl px-3 md:px-4 py-2 text-xs md:text-sm font-bold text-center pointer-events-auto
-              ${isMyTurn ? "bg-yellow-400 text-gray-900" : "bg-white/10 text-white/60"}`}>
+            <div
+              className={`rounded-xl px-3 md:px-4 py-2 text-xs md:text-sm font-bold text-center pointer-events-auto
+              ${isMyTurn ? "bg-yellow-400 text-gray-900" : "bg-white/10 text-white/60"}`}
+            >
               {isMyTurn
                 ? selectedCard !== null
                   ? "👆 Clique novamente para jogar!"
@@ -421,19 +469,26 @@ function GameContent() {
                     forbiddenBet >= 0 &&
                     forbiddenBet <= gameState.cardsThisRound && (
                       <p className="text-red-400 text-xs mb-2">
-                        Proibido apostar {forbiddenBet} (soma ficaria igual ao nº de vazas)
+                        Proibido apostar {forbiddenBet} (soma ficaria igual ao
+                        nº de vazas)
                       </p>
                     )}
                   <div className="flex gap-2 flex-wrap justify-center">
-                    {Array.from({ length: gameState.cardsThisRound + 1 }, (_, i) => i).map((n) => (
+                    {Array.from(
+                      { length: gameState.cardsThisRound + 1 },
+                      (_, i) => i,
+                    ).map((n) => (
                       <button
                         key={n}
                         onClick={() => placeBet(n)}
-                        disabled={gameState.cardsThisRound > 1 && n === forbiddenBet}
+                        disabled={
+                          gameState.cardsThisRound > 1 && n === forbiddenBet
+                        }
                         className={`w-10 h-10 md:w-11 md:h-11 rounded-lg font-bold text-base md:text-lg transition-all
-                          ${gameState.cardsThisRound > 1 && n === forbiddenBet
-                            ? "bg-white/10 text-white/20 cursor-not-allowed line-through"
-                            : "bg-yellow-400 hover:bg-yellow-300 text-gray-900 active:scale-95"
+                          ${
+                            gameState.cardsThisRound > 1 && n === forbiddenBet
+                              ? "bg-white/10 text-white/20 cursor-not-allowed line-through"
+                              : "bg-yellow-400 hover:bg-yellow-300 text-gray-900 active:scale-95"
                           }`}
                       >
                         {n}
@@ -449,18 +504,30 @@ function GameContent() {
                       : "Aguarde sua vez de apostar..."}
                   </p>
                   <p className="text-white/40 text-[10px] md:text-xs mt-1">
-                    Vez de {gameState.players.find((p) => p.id === gameState.currentTurn)?.name}
+                    Vez de{" "}
+                    {
+                      gameState.players.find(
+                        (p) => p.id === gameState.currentTurn,
+                      )?.name
+                    }
                   </p>
                   <div className="flex gap-1 md:gap-2 flex-wrap justify-center mt-2">
                     {gameState.bettingOrder.map((id) => {
                       const p = gameState.players.find((x) => x.id === id);
                       const b = gameState.bets[id];
                       return (
-                        <div key={id} className="text-[10px] md:text-xs bg-white/10 rounded px-1.5 md:px-2 py-0.5 md:py-1">
+                        <div
+                          key={id}
+                          className="text-[10px] md:text-xs bg-white/10 rounded px-1.5 md:px-2 py-0.5 md:py-1"
+                        >
                           {p?.name}:{" "}
-                          {b !== undefined
-                            ? <span className="text-yellow-300 font-bold">{b}</span>
-                            : "..."}
+                          {b !== undefined ? (
+                            <span className="text-yellow-300 font-bold">
+                              {b}
+                            </span>
+                          ) : (
+                            "..."
+                          )}
                         </div>
                       );
                     })}
@@ -469,25 +536,29 @@ function GameContent() {
               )}
             </div>
           )}
-
         </div>
       </div>
 
-        {/* Chat panel (right) */}
-        <div className="absolute flex flex-col justify-end right-4 top-20 bottom-28 z-30 pointer-events-auto">
-          <Chat messages={chatMessages} send={sendChat} compact />
-        </div>
+      {/* Chat panel (right) */}
+      <div className="absolute flex flex-col justify-end right-4 top-20 bottom-28 z-30 pointer-events-auto">
+        <Chat messages={chatMessages} send={sendChat} compact />
+      </div>
 
       {/* Minha mão — fixo na parte inferior */}
       {me && !me.isEliminated && (
         <div className="flex flex-col items-center gap-1.5 md:gap-2 pb-2 pt-2 shrink-0 bg-black/20">
           <div className="flex items-center gap-2 md:gap-3 text-xs md:text-sm flex-wrap justify-center px-2">
             <span className="font-bold">{me.name}</span>
-            <span>{renderLives(me.lives, gameState.config.livesPerPlayer)}</span>
-            {dealerPlayer?.id === myId && <span title="Você é o pé">🦶 Pé</span>}
+            <span>
+              {renderLives(me.lives, gameState.config.livesPerPlayer)}
+            </span>
+            {dealerPlayer?.id === myId && (
+              <span title="Você é o pé">🦶 Pé</span>
+            )}
             {gameState.bets[myId] !== undefined && (
               <span className="text-yellow-300 font-mono">
-                apostei {gameState.bets[myId]} | fiz {gameState.tricksTaken[myId] ?? 0}
+                apostei {gameState.bets[myId]} | fiz{" "}
+                {gameState.tricksTaken[myId] ?? 0}
               </span>
             )}
             <button
@@ -553,16 +624,29 @@ function GameContent() {
             <div className="flex flex-col gap-2 md:gap-3 text-xs md:text-sm text-white/80">
               <div className="bg-white/5 rounded-lg p-2.5 md:p-3">
                 <h3 className="font-bold text-white mb-1">🃏 Rodadas</h3>
-                <p>Começam com 1 carta, sobem até o máximo ({gameState.config.maxRounds} cartas) e voltam. Quem errar a aposta perde uma vida.</p>
+                <p>
+                  Começam com 1 carta, sobem até o máximo (
+                  {gameState.config.maxRounds} cartas) e voltam. Quem errar a
+                  aposta perde uma vida.
+                </p>
               </div>
               <div className="bg-white/5 rounded-lg p-2.5 md:p-3">
-                <h3 className="font-bold text-white mb-1">🔥 Ordem das Cartas</h3>
-                <p className="font-mono text-[10px] md:text-xs leading-relaxed">{CARD_ORDER}</p>
-                <p className="text-[10px] md:text-xs text-yellow-300 mt-1">4♣, 7♥, A♠ e 7♦ são manilhas (mais fortes)</p>
+                <h3 className="font-bold text-white mb-1">
+                  🔥 Ordem das Cartas
+                </h3>
+                <p className="font-mono text-[10px] md:text-xs leading-relaxed">
+                  {CARD_ORDER}
+                </p>
+                <p className="text-[10px] md:text-xs text-yellow-300 mt-1">
+                  4♣, 7♥, A♠ e 7♦ são manilhas (mais fortes)
+                </p>
               </div>
               <div className="bg-white/5 rounded-lg p-2.5 md:p-3">
                 <h3 className="font-bold text-white mb-1">🦶 O Pé</h3>
-                <p>O último a apostar. Da 2ª rodada em diante, não pode deixar a soma igual ao nº de vazas.</p>
+                <p>
+                  O último a apostar. Da 2ª rodada em diante, não pode deixar a
+                  soma igual ao nº de vazas.
+                </p>
               </div>
               <div className="bg-white/5 rounded-lg p-2.5 md:p-3">
                 <h3 className="font-bold text-white mb-1">🤝 Empate na Vaza</h3>
@@ -574,18 +658,34 @@ function GameContent() {
                 )}
               </div>
               <div className="bg-white/5 rounded-lg p-2.5 md:p-3">
-                <h3 className="font-bold text-white mb-1">❤️ Vidas e Eliminação</h3>
-                <p>Começa com {gameState.config.livesPerPlayer} vida{gameState.config.livesPerPlayer > 1 ? "s" : ""}. Errar = -1 vida. Com 0, eliminado.</p>
+                <h3 className="font-bold text-white mb-1">
+                  ❤️ Vidas e Eliminação
+                </h3>
+                <p>
+                  Começa com {gameState.config.livesPerPlayer} vida
+                  {gameState.config.livesPerPlayer > 1 ? "s" : ""}. Errar = -1
+                  vida. Com 0, eliminado.
+                </p>
               </div>
               {gameState.config.cardOnForeheadRule && (
                 <div className="bg-white/5 rounded-lg p-2.5 md:p-3">
-                  <h3 className="font-bold text-white mb-1">👀 Carta na Testa</h3>
-                  <p>Na rodada de 1 carta, você não vê a sua — mas vê a de todos os outros!</p>
+                  <h3 className="font-bold text-white mb-1">
+                    👀 Carta na Testa
+                  </h3>
+                  <p>
+                    Na rodada de 1 carta, você não vê a sua — mas vê a de todos
+                    os outros!
+                  </p>
                 </div>
               )}
               <div className="bg-white/5 rounded-lg p-2.5 md:p-3">
-                <h3 className="font-bold text-white mb-1">💀 Eliminação Simultânea</h3>
-                <p>Se dois ou mais jogadores perderem a última vida na mesma rodada, todos são eliminados juntos.</p>
+                <h3 className="font-bold text-white mb-1">
+                  💀 Eliminação Simultânea
+                </h3>
+                <p>
+                  Se dois ou mais jogadores perderem a última vida na mesma
+                  rodada, todos são eliminados juntos.
+                </p>
               </div>
             </div>
             <button
@@ -602,7 +702,9 @@ function GameContent() {
       {showQuit && (
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 rounded-2xl p-5 md:p-6 w-full max-w-xs text-center">
-            <h2 className="text-lg md:text-xl font-black text-red-400 mb-2">🚪 Sair da Partida?</h2>
+            <h2 className="text-lg md:text-xl font-black text-red-400 mb-2">
+              🚪 Sair da Partida?
+            </h2>
             <p className="text-white/60 text-xs md:text-sm mb-5 md:mb-6">
               Você será eliminado e os outros jogadores continuarão sem você.
             </p>
@@ -616,7 +718,9 @@ function GameContent() {
               <button
                 onClick={() => {
                   quitGame();
-                  router.push("/");
+                  setTimeout(() => {
+                    window.location.href = "/";
+                  }, 100);
                 }}
                 className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg text-sm"
               >
@@ -641,16 +745,33 @@ function GameContent() {
                 const acertou = bet === taken;
                 const eliminado = roundEnd.eliminated.includes(p.id);
                 return (
-                  <div key={p.id} className={`flex items-center justify-between rounded-lg px-2.5 md:px-3 py-1.5 md:py-2
-                    ${eliminado ? "bg-red-950/80 border border-red-700" : acertou ? "bg-green-900/50" : "bg-red-900/40"}`}>
+                  <div
+                    key={p.id}
+                    className={`flex items-center justify-between rounded-lg px-2.5 md:px-3 py-1.5 md:py-2
+                    ${eliminado ? "bg-red-950/80 border border-red-700" : acertou ? "bg-green-900/50" : "bg-red-900/40"}`}
+                  >
                     <div className="flex items-center gap-1.5 md:gap-2">
                       {eliminado && <span>💀</span>}
-                      <span className="font-medium text-xs md:text-sm">{p.name}</span>
+                      <span className="font-medium text-xs md:text-sm">
+                        {p.name}
+                      </span>
                     </div>
                     <span className="text-[10px] md:text-xs">
                       apostou {bet}, fez {taken} →{" "}
-                      <span className={eliminado ? "text-red-400 font-black" : acertou ? "text-green-400" : "text-red-400"}>
-                        {eliminado ? "ELIMINADO" : acertou ? "✓ ok" : "✗ -1 vida"}
+                      <span
+                        className={
+                          eliminado
+                            ? "text-red-400 font-black"
+                            : acertou
+                              ? "text-green-400"
+                              : "text-red-400"
+                        }
+                      >
+                        {eliminado
+                          ? "ELIMINADO"
+                          : acertou
+                            ? "✓ ok"
+                            : "✗ -1 vida"}
                       </span>
                     </span>
                   </div>
@@ -692,9 +813,18 @@ function GameContent() {
       {voteKick && (
         <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 rounded-2xl p-5 w-full max-w-xs text-center">
-            <h2 className="text-lg font-black text-purple-400 mb-2">🗳️ Votação de Kick</h2>
+            <h2 className="text-lg font-black text-purple-400 mb-2">
+              🗳️ Votação de Kick
+            </h2>
             <p className="text-white/80 text-sm mb-1">
-              Expulsar <span className="font-bold text-white">{gameState.players.find((p) => p.id === voteKick.targetId)?.name}</span>?
+              Expulsar{" "}
+              <span className="font-bold text-white">
+                {
+                  gameState.players.find((p) => p.id === voteKick.targetId)
+                    ?.name
+                }
+              </span>
+              ?
             </p>
             {voteUpdate && (
               <p className="text-white/50 text-xs mb-3">
@@ -718,7 +848,9 @@ function GameContent() {
         <div className="absolute inset-0 bg-black/90 flex items-center justify-center z-[60] p-4">
           <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-xs text-center">
             <span className="text-4xl">🚫</span>
-            <h2 className="text-xl font-black text-red-400 mt-3 mb-2">Você foi expulso!</h2>
+            <h2 className="text-xl font-black text-red-400 mt-3 mb-2">
+              Você foi expulso!
+            </h2>
             <p className="text-white/60 text-sm">Redirecionando...</p>
           </div>
         </div>
