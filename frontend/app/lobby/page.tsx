@@ -163,6 +163,8 @@ function LobbyContent() {
                 onChange={(e) =>
                   updateConfig({ deckCount: Number(e.target.value) as 1 | 2 })
                 }
+                disabled={gameState.config.fdpRule}
+                title={gameState.config.fdpRule ? "Gerenciado automaticamente pela Regra FDP" : undefined}
               >
                 <option value={1} className="text-gray-900">1 baralho (40 cartas)</option>
                 <option value={2} className="text-gray-900">2 baralhos (80 cartas)</option>
@@ -173,6 +175,28 @@ function LobbyContent() {
               </span>
             )}
           </div>
+
+          {/* Opção exclusiva Regra FDP: começar com baralho duplo */}
+          {gameState.config.fdpRule && (
+            <div className="flex items-center justify-between pl-4 border-l-2 border-yellow-400/40">
+              <div className="flex flex-col">
+                <span className="text-sm">Começar com 2 baralhos</span>
+                <span className="text-[10px] text-white/40">Se desmarcado, usa 1 baralho até precisar de 2</span>
+              </div>
+              {isHost ? (
+                <input
+                  type="checkbox"
+                  className="w-5 h-5 accent-yellow-400 ml-3 shrink-0"
+                  checked={gameState.config.fdpStartDoubleDeck ?? false}
+                  onChange={(e) => updateConfig({ fdpStartDoubleDeck: e.target.checked })}
+                />
+              ) : (
+                <span className={`text-sm font-bold ml-3 ${gameState.config.fdpStartDoubleDeck ? "text-green-400" : "text-white/40"}`}>
+                  {gameState.config.fdpStartDoubleDeck ? "✓ Sim" : "✗ Não"}
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <span className="text-sm">Sala Pública</span>

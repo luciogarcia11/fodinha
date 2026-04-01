@@ -30,14 +30,17 @@ export default function CardComponent({
     : 'w-16 h-24 rounded-lg text-sm';
 
   if (hidden || !card) {
+    const backIsRed = card?.deckColor === 'red';
+    const backBg = backIsRed ? 'bg-red-800 border-red-600' : 'bg-blue-800 border-blue-600';
+    const backText = backIsRed ? 'text-red-400' : 'text-blue-400';
     return (
       <motion.div
-        className={`${base} bg-blue-800 border-2 border-blue-600 flex items-center justify-center select-none ${onClick && !disabled ? 'cursor-pointer' : 'cursor-default'}`}
+        className={`${base} ${backBg} border-2 flex items-center justify-center select-none ${onClick && !disabled ? 'cursor-pointer' : 'cursor-default'}`}
         whileHover={onClick && !disabled ? { y: -4 } : {}}
         whileTap={onClick && !disabled ? { scale: 0.97 } : {}}
         onClick={!disabled ? onClick : undefined}
       >
-        <span className="text-blue-400 text-lg">🂠</span>
+        <span className={`${backText} text-lg`}>🂠</span>
       </motion.div>
     );
   }
