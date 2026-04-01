@@ -22,12 +22,14 @@ export interface Player {
   hand: Card[];
   connected: boolean;
   isEliminated: boolean;
+  isSpectator: boolean;
   sessionId: string;
 }
 
 export interface GameConfig {
   livesPerPlayer: number;
   fdpRule: boolean;
+  fdpStartDoubleDeck: boolean;
   cardOnForeheadRule: boolean;
   suitTiebreakerRule: boolean;
   maxRounds: number;

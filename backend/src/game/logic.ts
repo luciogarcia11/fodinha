@@ -42,37 +42,48 @@ function resolveVazaStandard(trick: PlayedCard[], suitTiebreakerRule: boolean): 
 }
 
 /**
+ * Chave de anulação de uma carta para o modo FDP.
+ * Manilhas: identidade completa (value-suit) — zap só anula outro zap do segundo baralho.
+ * Comuns: apenas o valor — todos os Reis se anulam entre si independente de naipe.
+ */
+function tieKey(p: PlayedCard): string {
+  return p.card.isManilha ? `${p.card.value}-${p.card.suit}` : p.card.value;
+}
+
+/**
  * Resolve vaza no modo FDP.
- * Separa manilhas e comuns.
- * Anula TODAS as cartas comuns de mesmo valor (se houver 2 ou mais).
- * Manilhas nunca se anulam.
+ * Cartas que compartilham a mesma chave de anulação (≥2 ocorrências) se cancelam.
+ * Manilhas só se anulam com a manilha idêntica (possível em baralho duplo).
+ * Múltiplas amarrações simultâneas (ex: dois Reis + dois Doses) são tratadas de uma vez.
+ * Marca `annulled = true` nos PlayedCards cancelados (mutação in-place para UI).
  */
 function resolveVazaFDP(trick: PlayedCard[], suitTiebreakerRule: boolean): string | null {
-  // Separa manilhas e comuns
-  const manilhas = trick.filter(p => p.card.isManilha);
-  const comuns = trick.filter(p => !p.card.isManilha);
-
-  // Conta quantas vezes cada valor aparece entre as cartas comuns
-  const valueCounts: Record<string, number> = {};
-  for (const p of comuns) {
-    valueCounts[p.card.value] = (valueCounts[p.card.value] ?? 0) + 1;
+  // Conta por chave de anulação
+  const keyCounts: Record<string, number> = {};
+  for (const p of trick) {
+    const k = tieKey(p);
+    keyCounts[k] = (keyCounts[k] ?? 0) + 1;
   }
 
-  // Mantém apenas as cartas comuns que aparecem uma única vez
-  const comunsRestantes = comuns.filter(p => valueCounts[p.card.value] === 1);
-
-  // Candidatos finais: manilhas + comuns não anuladas
-  const candidates = [...manilhas, ...comunsRestantes];
+  // Marca anuladas e coleta candidatos sobreviventes
+  const candidates: PlayedCard[] = [];
+  for (const p of trick) {
+    if (keyCounts[tieKey(p)] >= 2) {
+      p.annulled = true;
+    } else {
+      candidates.push(p);
+    }
+  }
 
   if (candidates.length === 0) return null;
 
-  // Encontra a maior força
+  // Carta mais forte entre as não anuladas vence
   const maxStrength = Math.max(...candidates.map(p => p.card.strength));
   const winners = candidates.filter(p => p.card.strength === maxStrength);
 
   if (winners.length === 1) return winners[0].playerId;
 
-  // Empate entre os mais fortes
+  // Empate residual (duas cartas iguais não anuladas — impossível com chave correcta, mas seguro)
   if (suitTiebreakerRule) {
     const maxSuit = Math.max(...winners.map(p => SUIT_STRENGTH[p.card.suit]));
     const suitWinners = winners.filter(p => SUIT_STRENGTH[p.card.suit] === maxSuit);
@@ -143,27 +154,28 @@ function calculateTrickStateStandard(trick: PlayedCard[], suitTiebreakerRule: bo
 }
 
 function calculateTrickStateFDP(trick: PlayedCard[], suitTiebreakerRule: boolean): TrickState {
-  // Separa manilhas e comuns
-  const manilhas = trick.filter(p => p.card.isManilha);
-  const comuns = trick.filter(p => !p.card.isManilha);
-
-  // Conta quantas vezes cada valor aparece entre as cartas comuns
-  const valueCounts: Record<string, number> = {};
-  for (const p of comuns) {
-    valueCounts[p.card.value] = (valueCounts[p.card.value] ?? 0) + 1;
+  // Conta por chave de anulação (mesma lógica de resolveVazaFDP)
+  const keyCounts: Record<string, number> = {};
+  for (const p of trick) {
+    const k = tieKey(p);
+    keyCounts[k] = (keyCounts[k] ?? 0) + 1;
   }
 
-  // Mantém apenas as cartas comuns que aparecem uma única vez
-  const comunsRestantes = comuns.filter(p => valueCounts[p.card.value] === 1);
-
-  // Candidatos finais: manilhas + comuns não anuladas
-  const candidates = [...manilhas, ...comunsRestantes];
+  // Marca annulled in-place e coleta candidatos (para feedback visual em tempo real)
+  const candidates: PlayedCard[] = [];
+  for (const p of trick) {
+    if (keyCounts[tieKey(p)] >= 2) {
+      p.annulled = true;
+    } else {
+      p.annulled = false;
+      candidates.push(p);
+    }
+  }
 
   if (candidates.length === 0) {
     return { winningCardPlayerId: null, isTied: true, lastStrongCardPlayerId: null };
   }
 
-  // Encontra a maior força
   const maxStrength = Math.max(...candidates.map(p => p.card.strength));
   const winners = candidates.filter(p => p.card.strength === maxStrength);
 
@@ -175,7 +187,6 @@ function calculateTrickStateFDP(trick: PlayedCard[], suitTiebreakerRule: boolean
     };
   }
 
-  // Empate entre os mais fortes
   if (suitTiebreakerRule) {
     const maxSuit = Math.max(...winners.map(p => SUIT_STRENGTH[p.card.suit]));
     const suitWinners = winners.filter(p => SUIT_STRENGTH[p.card.suit] === maxSuit);
