@@ -45,6 +45,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
   const config: GameConfig = {
     livesPerPlayer: 3,
     fdpRule: false,
+    fdpStartDoubleDeck: false,
     cardOnForeheadRule: true,
     suitTiebreakerRule: false,
     maxRounds: 0,
@@ -59,6 +60,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
     hand: [],
     connected: true,
     isEliminated: false,
+    isSpectator: false,
     sessionId: generateSessionId(),
   };
 
@@ -130,6 +132,7 @@ export function joinRoom(roomId: string, playerId: string, playerName: string): 
     hand: [],
     connected: true,
     isEliminated: false,
+    isSpectator: false,
     sessionId: generateSessionId(),
   };
 
@@ -140,20 +143,60 @@ export function joinRoom(roomId: string, playerId: string, playerName: string): 
 }
 
 /**
+ * Entra como espectador externo em uma partida em andamento.
+ * Máximo de 10 espectadores por sala. Não adiciona ao bettingOrder.
+ */
+export function joinAsSpectator(roomId: string, socketId: string, playerName: string): GameState | null {
+  const state = rooms.get(roomId);
+  if (!state) return null;
+  // Só permite entrar como espectador em partidas ativas (não no lobby)
+  if (state.phase === 'lobby' || state.phase === 'game_over') return null;
+
+  if (!playerName || playerName.trim().length === 0 || playerName.trim().length > 16) return null;
+
+  const spectatorCount = state.players.filter(p => p.isSpectator).length;
+  if (spectatorCount >= 10) return null;
+
+  // Evita duplicação
+  const existing = state.players.find(p => p.id === socketId);
+  if (existing) {
+    existing.connected = true;
+    return state;
+  }
+
+  const spectator: Player = {
+    id: socketId,
+    name: playerName.trim(),
+    lives: 0,
+    hand: [],
+    connected: true,
+    isEliminated: true,
+    isSpectator: true,
+    sessionId: generateSessionId(),
+  };
+
+  state.players.push(spectator);
+  saveRoom(state);
+
+  return state;
+}
+
+/**
  * Reconecta um jogador à sala usando sessionId.
  * Atualiza o socket id do jogador e cancela o timer de desconexão.
  * Garante que o cache em memória esteja sincronizado com o banco de dados.
  */
 export function rejoinRoom(roomId: string, sessionId: string, newSocketId: string): GameState | null {
-  // Always load from SQLite to ensure data consistency
-  // This ensures chat messages are always up-to-date from database
-  const state = loadRoom(roomId);
+  // Prefer in-memory state to avoid overwriting concurrent changes.
+  // Only fall back to DB if room is not in memory (cold-start recovery).
+  const liveState = rooms.get(roomId);
+  const state = liveState ?? loadRoom(roomId);
   if (!state) return null;
 
-  // Update in-memory cache with fresh data from database
-  rooms.set(roomId, state);
-
-  console.log(`[Rejoin] Sala ${roomId} carregada do banco para jogador ${newSocketId} - chatMessages: ${state.chatMessages.length}`);
+  if (!liveState) {
+    rooms.set(roomId, state);
+    console.log(`[Rejoin] Sala ${roomId} carregada do banco para jogador ${newSocketId} - chatMessages: ${state.chatMessages.length}`);
+  }
 
   // Check if this session is banned (from SQLite)
   if (isPlayerBanned(roomId, sessionId)) return null;
@@ -203,10 +246,24 @@ export function dealRound(state: GameState): GameState {
 
   const activePlayers = state.players.filter(p => !p.isEliminated);
 
-  // Usa múltiplos baralhos baseado na configuração
-  const deck = state.config.deckCount === 2
-    ? shuffleDeck(buildMultiDeck())
-    : shuffleDeck(buildDeck('blue'));
+  // Seleciona o deck:
+  // - Sem FDP: usa deckCount da configuração (1 ou 2 baralhos fixo)
+  // - Com FDP + fdpStartDoubleDeck: sempre usa baralho duplo
+  // - Com FDP sem fdpStartDoubleDeck: usa baralho simples até o limite de 40 cartas;
+  //   escala automaticamente para duplo quando necessário
+  let usedDouble = false;
+  let deck: ReturnType<typeof buildDeck>;
+  if (state.config.fdpRule) {
+    const needsDouble = state.config.fdpStartDoubleDeck
+      || activePlayers.length * cardsThisRound > 40;
+    usedDouble = needsDouble;
+    deck = needsDouble ? shuffleDeck(buildMultiDeck()) : shuffleDeck(buildDeck('blue'));
+  } else {
+    usedDouble = state.config.deckCount === 2;
+    deck = usedDouble ? shuffleDeck(buildMultiDeck()) : shuffleDeck(buildDeck('blue'));
+  }
+  // Atualiza deckCount no estado para refletir o deck efectivamente usado
+  state.config.deckCount = usedDouble ? 2 : 1;
   const hands = dealCards(deck, activePlayers.length, cardsThisRound);
 
   activePlayers.forEach((p, i) => {
@@ -279,6 +336,7 @@ export function disconnectPlayer(
     // Inicia timer de reconexão (30 segundos)
     const timer = setTimeout(() => {
       try {
+        disconnectTimers.delete(sessionId);
         const currentState = rooms.get(roomId);
         if (!currentState) {
           console.error(`[Disconnect Timer] Sala ${roomId} não existe mais`);
@@ -300,7 +358,6 @@ export function disconnectPlayer(
         console.log(`[Disconnect Timer] Eliminando jogador ${playerName} por timeout na sala ${roomId}`);
         currentPlayer.isEliminated = true;
         currentPlayer.lives = 0;
-        disconnectTimers.delete(sessionId);
 
         if (onEliminate) {
           onEliminate();
@@ -358,11 +415,41 @@ export function listPublicRooms(): Array<{
     const cachedRoom = rooms.get(dbRoom.roomId);
     return {
       ...dbRoom,
-      playerCount: cachedRoom ? cachedRoom.players.length : dbRoom.playerCount,
+      playerCount: cachedRoom
+        ? cachedRoom.players.filter((p: any) => !p.isSpectator).length
+        : dbRoom.playerCount,
     };
   });
 
   return result;
+}
+
+/**
+ * Lista salas públicas em andamento para espectadores externos.
+ */
+export function listWatchableRooms(): Array<{
+  roomId: string;
+  hostName: string;
+  phase: string;
+  playerCount: number;
+  spectatorCount: number;
+  maxPlayers: number;
+  config: GameConfig;
+}> {
+  const dbRooms = require('../db/rooms').listWatchableRoomsDB();
+
+  return dbRooms.map((dbRoom: any) => {
+    const cachedRoom = rooms.get(dbRoom.roomId);
+    return {
+      ...dbRoom,
+      playerCount: cachedRoom
+        ? cachedRoom.players.filter((p: any) => !p.isSpectator && !p.isEliminated).length
+        : dbRoom.playerCount,
+      spectatorCount: cachedRoom
+        ? cachedRoom.players.filter((p: any) => p.isSpectator).length
+        : 0,
+    };
+  }).filter((r: any) => r.playerCount > 0);
 }
 
 /**
@@ -373,10 +460,12 @@ export function listPublicRooms(): Array<{
  */
 export function cleanupEmptyRooms(): { removedCount: number; details: Array<{ roomId: string; phase: string; lastActivity?: number }> } {
   const removedRooms: Array<{ roomId: string; phase: string; lastActivity?: number }> = [];
-  const thirtyMinutesAgo = Math.floor(Date.now() / 1000) - 1800; // 30 minutos em segundos
+  // Salas inativas há mais de 15 minutos sem nenhum jogador conectado são elegíveis para remoção.
+  const fifteenMinutesAgo = Math.floor(Date.now() / 1000) - 900;
 
   for (const [roomId, state] of rooms) {
     const connected = state.players.filter(p => p.connected);
+    // Sala em jogo sem nenhum jogador conectado — elegível para limpeza
     const shouldRemove = connected.length === 0 && state.phase !== 'lobby';
 
     // Remove lobby rooms with no players
@@ -397,8 +486,8 @@ export function cleanupEmptyRooms(): { removedCount: number; details: Array<{ ro
       try {
         const lastActivity = loadRoomLastActivity(roomId);
 
-        // Don't remove if recently active (less than 30 minutes)
-        if (lastActivity && lastActivity > thirtyMinutesAgo) {
+        // Don't remove if recently active (less than 15 minutes)
+        if (lastActivity && lastActivity > fifteenMinutesAgo) {
           console.log(`⏸️  Sala ${roomId} mantida (atividade recente: ${new Date(lastActivity * 1000).toISOString()})`);
           continue;
         }

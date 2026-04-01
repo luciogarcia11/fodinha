@@ -7,13 +7,16 @@ import {
   getRoom,
   getAllRooms,
   joinRoom,
+  joinAsSpectator,
   rejoinRoom,
   startGame,
   dealRound,
   updateConfig,
   disconnectPlayer,
   listPublicRooms,
+  listWatchableRooms,
   cleanupEmptyRooms,
+  deleteRoom,
   addChatMessage,
   addReaction,
   banPlayer as banPlayerRoom,
@@ -35,7 +38,7 @@ import {
   getGlobalChatMessages,
   addGlobalChatMessage,
 } from "./db/schema";
-import { getRoomReactions, checkRateLimit, cleanupInactiveRooms } from "./db/rooms";
+import { getRoomReactions, checkRateLimit, cleanupInactiveRooms, saveRoom } from "./db/rooms";
 import {
   validatePlayerName,
   validateRoomCode,
@@ -71,8 +74,12 @@ setInterval(() => {
 }, 60000);
 
 // More frequent cleanup of empty rooms (every 15 seconds)
+// cleanupInactiveRooms removes from SQLite; we then purge the same rooms from the in-memory Map.
 setInterval(() => {
-  cleanupInactiveRooms();
+  const deletedIds = cleanupInactiveRooms();
+  for (const roomId of deletedIds) {
+    deleteRoom(roomId); // idempotent: no-op if already removed from memory
+  }
 }, 15000);
 
 const io = new Server(httpServer, {
@@ -88,6 +95,9 @@ setInterval(() => cleanupEmptyRooms(), 30000);
 
 // Timers de vote-kick (roomId → timeout)
 const voteKickTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Cooldown de iniciação de vote-kick (socketId → timestamp da última iniciação)
+const voteInitiateCooldowns = new Map<string, number>();
 
 /**
  * Obtém o próximo jogador na ordem de jogo (sentido horário = direita).
@@ -107,6 +117,26 @@ const afkTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Track rooms that have already ended to prevent duplicate game_over events
 const gameOverRooms = new Set<string>();
+
+// Timers de game-over: sala fica aberta 5 min para placar, depois fecha.
+const gameOverTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function cancelGameOverTimer(roomId: string): void {
+  const t = gameOverTimers.get(roomId);
+  if (t) { clearTimeout(t); gameOverTimers.delete(roomId); }
+}
+
+function startGameOverTimer(roomId: string): void {
+  cancelGameOverTimer(roomId);
+  const timer = setTimeout(() => {
+    deleteRoom(roomId);
+    gameOverRooms.delete(roomId);
+    gameOverTimers.delete(roomId);
+    io.to(roomId).emit('room:closed');
+    console.log(`[Game Over Timer] Sala ${roomId} fechada após 5 minutos`);
+  }, 300_000);
+  gameOverTimers.set(roomId, timer);
+}
 
 // Inicializa a referência no roomManager para limpar quando sala for deletada
 setGameOverRoomsRef(gameOverRooms);
@@ -141,8 +171,10 @@ function checkAndEmitGameOver(roomId: string, state: any): boolean {
   if (remaining.length < 2) {
     state.phase = "game_over";
     gameOverRooms.add(roomId);
+    saveRoom(state);
     const winner = remaining[0];
     io.to(roomId).emit("game:over", { winnerId: winner?.id ?? null });
+    startGameOverTimer(roomId);
     console.log(`[Game Over] Sala ${roomId} finalizada - vencedor: ${winner?.name ?? 'nenhum'}`);
     return true;
   }
@@ -172,6 +204,7 @@ function handleAfkKick(roomId: string) {
     }
 
     console.log(`[AFK] Removendo jogador ${target.name} por inatividade na sala ${roomId}`);
+    const nextTurn = getNextPlayer(state, targetId);
     target.isEliminated = true;
     target.lives = 0;
   
@@ -190,7 +223,7 @@ function handleAfkKick(roomId: string) {
     state.currentTrick = state.currentTrick.filter(t => t.playerId !== targetId);
     state.bettingOrder = state.bettingOrder.filter((id) => id !== targetId);
     if (state.players.filter(p => !p.isEliminated).length > 0) {
-      state.currentTurn = getNextPlayer(state, targetId);
+      state.currentTurn = nextTurn;
     }
   } else {
     state.bettingOrder = state.bettingOrder.filter((id) => id !== targetId);
@@ -265,7 +298,8 @@ io.on("connection", (socket) => {
   socket.on(
     "room:rejoin",
     ({ roomId, sessionId }: { roomId: string; sessionId: string }) => {
-      if (!roomId || !sessionId) {
+      if (!roomId || !sessionId || typeof roomId !== 'string' || typeof sessionId !== 'string'
+          || roomId.length > 10 || sessionId.length > 64) {
         socket.emit("room:rejoinFailed", { message: "Dados de sessão inválidos." });
         return;
       }
@@ -298,6 +332,7 @@ io.on("connection", (socket) => {
     if (started) {
       // Limpa o flag de game_over ao iniciar um novo jogo
       gameOverRooms.delete(roomId);
+      cancelGameOverTimer(roomId);
       io.to(roomId).emit("game:stateUpdate", started);
       resetAfkTimer(roomId);
     }
@@ -314,6 +349,9 @@ io.on("connection", (socket) => {
           socket.emit("room:error", { message: "Não é hora de apostar" });
           return;
         }
+
+        const bettingPlayer = state.players.find(p => p.id === socket.id);
+        if (!bettingPlayer || bettingPlayer.isSpectator) return;
 
         if (state.currentTurn !== socket.id) {
           socket.emit("room:error", { message: "Não é sua vez de apostar" });
@@ -361,7 +399,7 @@ io.on("connection", (socket) => {
       if (alreadyPlayed) return;
 
       const player = state.players.find((p) => p.id === socket.id);
-      if (!player || cardIndex < 0 || cardIndex >= player.hand.length) return;
+      if (!player || player.isSpectator || cardIndex < 0 || cardIndex >= player.hand.length) return;
 
       const [card] = player.hand.splice(cardIndex, 1);
       state.currentTrick.push({ playerId: socket.id, card, annulled: false });
@@ -392,6 +430,11 @@ io.on("connection", (socket) => {
               (state.tricksTaken[winnerId] ?? 0) + 1;
             state.trickLeader = winnerId;
           }
+
+          // Captura o último jogador ANTES de limpar a vaza (necessário para regra do mão na amarração)
+          const lastPlayedId = state.currentTrick.length > 0
+            ? state.currentTrick[state.currentTrick.length - 1].playerId
+            : null;
 
           io.to(roomId).emit("game:trickResult", {
             trick: state.currentTrick,
@@ -455,10 +498,9 @@ io.on("connection", (socket) => {
                 }, 4000);
               }
             } else {
-              // Vaza empatada: quem joga é o último que amarrou (última carta da vaza)
+              // Vaza empatada: quem joga a próxima é o último que amarrou
               if (winnerId === null) {
-                const lastPlayed = state.currentTrick[state.currentTrick.length - 1];
-                state.currentTurn = lastPlayed?.playerId ?? state.trickLeader;
+                state.currentTurn = lastPlayedId ?? state.trickLeader;
                 state.trickLeader = state.currentTurn;
               } else {
                 state.currentTurn = winnerId;
@@ -477,12 +519,23 @@ io.on("connection", (socket) => {
     },
   );
 
+  // ===== PLAYER:BECOMESPECTATOR =====
+  socket.on("player:becomeSpectator", ({ roomId }: { roomId: string }) => {
+    const state = getRoom(roomId);
+    if (!state) return;
+    const player = state.players.find(p => p.id === socket.id);
+    if (!player || !player.isEliminated) return;
+    player.isSpectator = true;
+    io.to(roomId).emit("game:stateUpdate", state);
+  });
+
   // ===== PLAYER:QUIT =====
   socket.on("player:quit", ({ roomId }: { roomId: string }) => {
     const state = getRoom(roomId);
     if (!state) return;
 
     const quitterName = state.players.find((p) => p.id === socket.id)?.name ?? "Jogador";
+    const nextTurnQuit = getNextPlayer(state, socket.id);
 
     disconnectPlayer(roomId, socket.id);
     // Elimina imediatamente no quit (não espera 30s)
@@ -498,7 +551,9 @@ io.on("connection", (socket) => {
     if (activePlayers.length < 2) {
       const lastPlayer = activePlayers[0];
       state.phase = "game_over";
+      saveRoom(state);
       io.to(roomId).emit("game:over", { winnerId: lastPlayer?.id ?? null });
+      startGameOverTimer(roomId);
       io.to(roomId).emit("game:stateUpdate", state);
       return;
     }
@@ -525,7 +580,7 @@ io.on("connection", (socket) => {
     if (state.phase === "playing" && state.currentTurn === socket.id) {
       // Remove carta dele da vaza atual se estiver
       state.currentTrick = state.currentTrick.filter(t => t.playerId !== socket.id);
-      state.currentTurn = getNextPlayer(state, socket.id);
+      state.currentTurn = nextTurnQuit;
     }
 
     io.to(roomId).emit("game:stateUpdate", state);
@@ -538,8 +593,18 @@ io.on("connection", (socket) => {
     const state = getRoom(roomId);
     if (!state || state.activeVoteKick) return;
 
+    // Cooldown de 60s por socket para evitar spam
+    const lastInitiated = voteInitiateCooldowns.get(socket.id) ?? 0;
+    if (Date.now() - lastInitiated < 60_000) {
+      const remaining = Math.ceil((60_000 - (Date.now() - lastInitiated)) / 1000);
+      socket.emit("room:error", { message: `Aguarde ${remaining}s antes de iniciar outro votekick`, code: "VOTE_COOLDOWN", remaining });
+      return;
+    }
+
     const target = state.players.find(p => p.id === targetId && !p.isEliminated);
     if (!target || target.id === socket.id) return;
+
+    voteInitiateCooldowns.set(socket.id, Date.now());
 
     state.activeVoteKick = {
       targetId,
@@ -590,13 +655,14 @@ io.on("connection", (socket) => {
       // Kick aprovado
       const targetPlayer = state.players.find(p => p.id === vote.targetId);
       if (targetPlayer) {
+        const nextTurnVote = getNextPlayer(state, vote.targetId);
         targetPlayer.isEliminated = true;
         targetPlayer.lives = 0;
         state.bettingOrder = state.bettingOrder.filter(id => id !== vote.targetId);
 
         // Se era a vez dele, avança
         if (state.currentTurn === vote.targetId) {
-          state.currentTurn = getNextPlayer(state, vote.targetId);
+          state.currentTurn = nextTurnVote;
         }
       }
 
@@ -631,12 +697,13 @@ io.on("connection", (socket) => {
     banPlayerRoom(roomId, target.sessionId, socket.id, 'Banido pelo host');
 
     // Elimina do jogo
+    const nextTurnBan = getNextPlayer(state, targetId);
     target.isEliminated = true;
     target.lives = 0;
     state.bettingOrder = state.bettingOrder.filter(id => id !== targetId);
 
     if (state.currentTurn === targetId) {
-      state.currentTurn = getNextPlayer(state, targetId);
+      state.currentTurn = nextTurnBan;
     }
 
     io.to(targetId).emit("game:kicked", { message: "Você foi banido pelo host." });
@@ -657,12 +724,13 @@ io.on("connection", (socket) => {
     const target = state.players.find(p => p.id === targetId);
     if (!target) return;
 
+    const nextTurnKick = getNextPlayer(state, targetId);
     target.isEliminated = true;
     target.lives = 0;
     state.bettingOrder = state.bettingOrder.filter(id => id !== targetId);
 
     if (state.currentTurn === targetId) {
-      state.currentTurn = getNextPlayer(state, targetId);
+      state.currentTurn = nextTurnKick;
     }
 
     io.to(targetId).emit("game:kicked", { message: "Você foi removido pelo host." });
@@ -739,9 +807,35 @@ io.on("connection", (socket) => {
     socket.emit("room:list", listPublicRooms());
   });
 
+  // ===== ROOM:LIST:WATCHABLE =====
+  socket.on("room:listWatchable", () => {
+    socket.emit("room:listWatchable", listWatchableRooms());
+  });
+
+  // ===== ROOM:JOIN:SPECTATOR =====
+  socket.on("room:joinAsSpectator", ({ roomId, name }: { roomId: string; name: string }) => {
+    try {
+      const validatedName = validatePlayerName(name);
+      const validatedRoomId = validateRoomId(roomId);
+      const state = joinAsSpectator(validatedRoomId, socket.id, validatedName);
+      if (!state) {
+        socket.emit("room:error", { message: "Partida não encontrada, já encerrada ou cheia de espectadores." });
+        return;
+      }
+      socket.join(validatedRoomId);
+      const player = state.players.find(p => p.id === socket.id);
+      socket.emit("room:sessionInfo", { sessionId: player?.sessionId });
+      io.to(validatedRoomId).emit("game:stateUpdate", state);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao entrar como espectador';
+      socket.emit("room:error", { message });
+    }
+  });
+
   // ===== DISCONNECT =====
   socket.on("disconnect", () => {
     console.log(`❌ Desconectado: ${socket.id}`);
+    voteInitiateCooldowns.delete(socket.id);
     try {
       for (const [roomId, state] of getAllRooms()) {
         const player = state.players.find((p) => p.id === socket.id);
@@ -753,6 +847,22 @@ io.on("connection", (socket) => {
           // No lobby: remove imediatamente
           disconnectPlayer(roomId, socket.id);
           io.to(roomId).emit("game:stateUpdate", state);
+          break;
+        }
+
+        // Se está na fase de game_over, apenas marca como desconectado
+        // e fecha a sala imediatamente se todos desconectaram
+        if (state.phase === "game_over") {
+          const p = state.players.find(q => q.id === socket.id);
+          if (p) p.connected = false;
+          const stillConnected = state.players.filter(q => q.connected);
+          if (stillConnected.length === 0) {
+            cancelGameOverTimer(roomId);
+            deleteRoom(roomId);
+            gameOverRooms.delete(roomId);
+            io.to(roomId).emit('room:closed');
+            console.log(`[Disconnect] Sala ${roomId} fechada imediatamente - todos desconectaram`);
+          }
           break;
         }
 
@@ -775,6 +885,7 @@ io.on("connection", (socket) => {
             }
 
             // Elimina o jogador
+            const nextTurnDisc = getNextPlayer(freshState, socket.id);
             freshPlayer.isEliminated = true;
             freshPlayer.lives = 0;
 
@@ -782,7 +893,7 @@ io.on("connection", (socket) => {
 
             // Se era a vez dele, avança
             if (freshState.currentTurn === socket.id) {
-              freshState.currentTurn = getNextPlayer(freshState, socket.id);
+              freshState.currentTurn = nextTurnDisc;
             }
             freshState.bettingOrder = freshState.bettingOrder.filter(id => id !== socket.id);
 
