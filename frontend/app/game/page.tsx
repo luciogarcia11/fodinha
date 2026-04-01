@@ -22,6 +22,10 @@ function GameContent() {
     winnerId,
     clearRoundEnd,
     quitGame,
+    becomeSpectator,
+    joinAsSpectator,
+    voteKickCooldownUntil,
+    gameOverAt,
     playerQuitName,
     playerReconnectedName,
     playerDisconnectedName,
@@ -44,6 +48,10 @@ function GameContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const roomCode = searchParams.get("room");
+  const spectateCode = searchParams.get("spectate");
+  const [spectatorName, setSpectatorName] = useState("");
+  const [showSpectatorJoin, setShowSpectatorJoin] = useState(false);
+  const [showSpectators, setShowSpectators] = useState(false);
   const [selectedCardState, setSelectedCardState] = useState<{
     turnId: string | null;
     idx: number | null;
@@ -62,6 +70,32 @@ function GameContent() {
   const [prevTrickResult, setPrevTrickResult] = useState<TrickResult | null>(
     null,
   );
+  // Cooldown de vote-kick: segundos restantes (atualizado por intervalo)
+  const [voteKickCooldownSec, setVoteKickCooldownSec] = useState(0);
+  // Conta regressiva do placar (5 min após game_over)
+  const [gameOverCountdown, setGameOverCountdown] = useState(300);
+
+  useEffect(() => {
+    if (!voteKickCooldownUntil) return;
+    const tick = () => {
+      const rem = Math.max(0, Math.ceil((voteKickCooldownUntil - Date.now()) / 1000));
+      setVoteKickCooldownSec(rem);
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [voteKickCooldownUntil]);
+
+  useEffect(() => {
+    if (!gameOverAt) return;
+    const tick = () => {
+      const rem = Math.max(0, Math.ceil((gameOverAt + 300_000 - Date.now()) / 1000));
+      setGameOverCountdown(rem);
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [gameOverAt]);
 
   if (trickResult !== prevTrickResult) {
     setPrevTrickResult(trickResult);
@@ -114,6 +148,13 @@ function GameContent() {
     return () => clearTimeout(t);
   }, [voteComplete, clearVoteComplete]);
 
+  // Exibe modal de nome para entrar como espectador via ?spectate=CODIGO
+  useEffect(() => {
+    if (spectateCode && !roomCode && !gameState) {
+      setShowSpectatorJoin(true);
+    }
+  }, [spectateCode, roomCode, gameState]);
+
   // Redirect if kicked
   useEffect(() => {
     if (kicked) {
@@ -125,6 +166,54 @@ function GameContent() {
   }, [kicked, router]);
 
   if (!gameState) {
+    // Modal de entrada como espectador via ?spectate=CODIGO
+    if (showSpectatorJoin && spectateCode) {
+      return (
+        <main className="min-h-screen flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-xs text-center">
+            <h2 className="text-xl font-black text-indigo-400 mb-4">👁️ Assistir Partida</h2>
+            <p className="text-white/60 text-sm mb-4">
+              Sala <span className="font-mono text-yellow-400">{spectateCode.toUpperCase()}</span>
+            </p>
+            <input
+              type="text"
+              placeholder="Seu nome"
+              value={spectatorName}
+              onChange={(e) => setSpectatorName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && spectatorName.trim()) {
+                  joinAsSpectator(spectateCode, spectatorName.trim());
+                  setShowSpectatorJoin(false);
+                }
+              }}
+              className="w-full bg-white/10 text-white placeholder-white/40 px-4 py-3 rounded-xl outline-none focus:ring-2 focus:ring-indigo-400 mb-4"
+              maxLength={16}
+              autoFocus
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => { window.location.href = "/"; }}
+                className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  if (spectatorName.trim()) {
+                    joinAsSpectator(spectateCode, spectatorName.trim());
+                    setShowSpectatorJoin(false);
+                  }
+                }}
+                disabled={!spectatorName.trim()}
+                className="flex-1 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40 text-white font-bold py-2 rounded-lg text-sm"
+              >
+                Entrar
+              </button>
+            </div>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="min-h-screen flex items-center justify-center">
         <p className="text-white/60 text-xl">Carregando jogo...</p>
@@ -134,6 +223,8 @@ function GameContent() {
 
   if (gameState.phase === "game_over" || winnerId) {
     const winner = gameState.players.find((p) => p.id === winnerId);
+    const mm = String(Math.floor(gameOverCountdown / 60)).padStart(2, '0');
+    const ss = String(gameOverCountdown % 60).padStart(2, '0');
     return (
       <main className="min-h-screen flex flex-col items-center justify-center gap-6">
         <h1 className="text-4xl md:text-5xl font-black text-yellow-400">
@@ -142,10 +233,11 @@ function GameContent() {
         <p className="text-xl md:text-2xl text-white">
           {winner?.id === myId ? "🎉 Você venceu!" : `${winner?.name} venceu!`}
         </p>
+        <p className="text-white/40 text-sm">
+          Sala fecha em <span className="font-mono text-white/70">{mm}:{ss}</span>
+        </p>
         <button
-          onClick={() => {
-            window.location.href = "/";
-          }}
+          onClick={() => { window.location.href = "/"; }}
           className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 px-8 rounded-xl text-lg"
         >
           Voltar ao início
@@ -275,8 +367,15 @@ function GameContent() {
               <CardComponent key={i} card={card} hidden={false} small />
             ))}
           </div>
+        ) : (gameState!.players.find(p => p.id === myId)?.isSpectator) ? (
+          // Espectador vê todas as cartas abertas
+          <div className="flex gap-0.5 flex-wrap justify-center max-w-[70px] md:max-w-[90px]">
+            {player.hand.map((card, i) => (
+              <CardComponent key={i} card={card} hidden={false} small />
+            ))}
+          </div>
         ) : (
-          <FanCards count={player.hand.length} />
+          <FanCards count={player.hand.length} hand={player.hand} />
         )}
         {/* Player action menu */}
         {showControls && !isMe && !player.isEliminated && (
@@ -286,9 +385,10 @@ function GameContent() {
                 initiateVoteKick(player.id);
                 setShowVoteKickTarget(null);
               }}
-              className="text-[9px] md:text-[10px] bg-purple-700/60 hover:bg-purple-700 text-white px-2 py-0.5 rounded"
+              className="text-[9px] md:text-[10px] bg-purple-700/60 hover:bg-purple-700 text-white px-2 py-0.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={voteKickCooldownSec > 0}
             >
-              🗳️ Votar kick
+              {voteKickCooldownSec > 0 ? `⏳ Aguarde ${voteKickCooldownSec}s` : "🗳️ Votar kick"}
             </button>
             {isHost && (
               <>
@@ -319,15 +419,15 @@ function GameContent() {
   }
 
   // Calcula posições absolutas dos jogadores ao redor da mesa.
-  // Ângulos: -120° (esquerda) a +120° (direita), passando por 0° (topo).
-  // O jogador na posição 0 da lista fica na esquerda (próximo a jogar).
+  // Ângulos: +120° (direita) a -120° (esquerda), passando por 0° (topo).
+  // O jogador na posição 0 da lista fica na DIREITA (próximo a jogar) → sentido anti-horário.
   function getPlayerPositions(
     count: number,
   ): { top: string; left: string; transform: string }[] {
     if (count === 0) return [];
     const positions: { top: string; left: string; transform: string }[] = [];
-    const startDeg = -120;
-    const endDeg = 120;
+    const startDeg = 120;
+    const endDeg = -120;
     for (let i = 0; i < count; i++) {
       const deg =
         count === 1 ? 0 : startDeg + (i * (endDeg - startDeg)) / (count - 1);
@@ -393,9 +493,7 @@ function GameContent() {
                 const isWinning = ts
                   ? ts.winningCardPlayerId === t.playerId && !ts.isTied
                   : false;
-                const isTied = ts
-                  ? ts.isTied && ts.winningCardPlayerId === t.playerId
-                  : false;
+                const isTied = t.annulled;
                 return (
                   <div
                     key={t.playerId}
@@ -541,7 +639,7 @@ function GameContent() {
 
       {/* Chat panel (right) */}
       <div className="absolute flex flex-col justify-end right-4 top-20 bottom-28 z-30 pointer-events-auto">
-        <Chat messages={chatMessages} send={sendChat} compact />
+        <Chat messages={chatMessages} send={sendChat} compact players={gameState.players} />
       </div>
 
       {/* Minha mão — fixo na parte inferior */}
@@ -592,6 +690,19 @@ function GameContent() {
               />
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Barra de espectador — substitui mão para quem está assistindo */}
+      {me && me.isSpectator && (
+        <div className="flex items-center justify-center gap-4 py-3 shrink-0 bg-black/30 border-t border-white/10">
+          <span className="text-white/50 text-sm font-bold">👁️ Assistindo a partida</span>
+          <button
+            onClick={() => { quitGame(); setTimeout(() => { window.location.href = "/"; }, 100); }}
+            className="text-xs text-red-400/70 hover:text-red-400 bg-red-900/20 hover:bg-red-900/40 px-3 py-1.5 rounded-lg transition-all"
+          >
+            🚪 Sair
+          </button>
         </div>
       )}
 
@@ -653,7 +764,7 @@ function GameContent() {
                 <p>Se as cartas mais fortes empatarem, ninguém faz a vaza.</p>
                 {gameState.config.fdpRule && (
                   <p className="text-[10px] md:text-xs text-yellow-300 mt-1">
-                    ⚡ FDP ativo: comuns iguais se anulam. Manilhas nunca.
+                    ⚡ FDP ativo: comuns iguais se anulam.{gameState.config.fdpStartDoubleDeck ? " No baralho duplo, manilhas iguais também se anulam." : " Manilhas nunca."}
                   </p>
                 )}
               </div>
@@ -687,6 +798,14 @@ function GameContent() {
                   rodada, todos são eliminados juntos.
                 </p>
               </div>
+              <div className="bg-white/5 rounded-lg p-2.5 md:p-3">
+                <h3 className="font-bold text-white mb-1">👁️ Espectadores</h3>
+                <p>
+                  Eliminados continuam assistindo. Externos podem entrar via
+                  hub de salas ou link <code className="text-yellow-300">/game?spectate=CODIGO</code>.
+                  Máx. 10 espectadores por sala.
+                </p>
+              </div>
             </div>
             <button
               onClick={() => setShowRules(false)}
@@ -695,6 +814,56 @@ function GameContent() {
               Fechar
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Overlay para jogador eliminado aguardando escolha */}
+      {me && me.isEliminated && !me.isSpectator && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-xs text-center flex flex-col gap-4">
+            <div className="text-5xl">💀</div>
+            <h2 className="text-xl font-black text-red-400">Você foi eliminado!</h2>
+            <p className="text-white/60 text-sm">O jogo continua... Quer assistir?</p>
+            <button
+              onClick={becomeSpectator}
+              className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 rounded-xl text-base transition-all"
+            >
+              👁️ Assistir como espectador
+            </button>
+            <button
+              onClick={() => { quitGame(); setTimeout(() => { window.location.href = "/"; }, 100); }}
+              className="bg-white/10 hover:bg-white/20 text-white/70 font-bold py-2 rounded-xl text-sm transition-all"
+            >
+              🚪 Sair do jogo
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Banner de espectador */}
+      {me && me.isSpectator && (
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 bg-black/70 border border-white/20 rounded-full px-4 py-1 text-white/70 text-xs font-bold pointer-events-none">
+          👁️ Modo Espectador — você vê todas as cartas
+        </div>
+      )}
+
+      {/* Widget de espectadores (canto inferior esquerdo) */}
+      {gameState.players.filter(p => p.isSpectator).length > 0 && (
+        <div className="absolute bottom-20 left-2 z-30">
+          <button
+            onClick={() => setShowSpectators(s => !s)}
+            className="bg-black/60 border border-white/20 rounded-full px-3 py-1 text-white/60 text-xs font-bold hover:bg-black/80"
+          >
+            👁️ {gameState.players.filter(p => p.isSpectator).length}
+          </button>
+          {showSpectators && (
+            <div className="mt-1 bg-gray-900/90 border border-white/10 rounded-xl p-2 min-w-[120px]">
+              <p className="text-white/40 text-[10px] font-bold uppercase mb-1">Espectadores</p>
+              {gameState.players.filter(p => p.isSpectator).map(p => (
+                <p key={p.id} className="text-white/70 text-xs py-0.5">{p.name}</p>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { socket } from "@/lib/socket";
-import { GameState, TrickResult, RoundEndData, VoteStartedData, VoteUpdateData, ChatMessage, PublicRoomInfo, Reaction } from "@/lib/types";
+import { GameState, TrickResult, RoundEndData, VoteStartedData, VoteUpdateData, ChatMessage, PublicRoomInfo, WatchableRoomInfo, Reaction } from "@/lib/types";
 
 const SESSION_KEY = "fodinha_session";
 
@@ -53,6 +53,9 @@ export function useGame() {
   const [globalChatMessages, setGlobalChatMessages] = useState<ChatMessage[]>([]);
   const [reactions, setReactions] = useState<Reaction[]>([]);
   const [publicRooms, setPublicRooms] = useState<PublicRoomInfo[]>([]);
+  const [watchableRooms, setWatchableRooms] = useState<WatchableRoomInfo[]>([]);
+  const [voteKickCooldownUntil, setVoteKickCooldownUntil] = useState<number>(0);
+  const [gameOverAt, setGameOverAt] = useState<number>(0);
 
   useEffect(() => {
     socket.connect();
@@ -144,7 +147,13 @@ export function useGame() {
 
     socket.on("game:over", ({ winnerId }: { winnerId: string }) => {
       setWinnerId(winnerId);
+      setGameOverAt(Date.now());
       clearSession();
+    });
+
+    socket.on("room:closed", () => {
+      clearSession();
+      window.location.href = "/";
     });
 
     socket.on("room:error", ({ message }: { message: string }) => {
@@ -195,6 +204,10 @@ export function useGame() {
       setPublicRooms(rooms);
     });
 
+    socket.on("room:listWatchable", (rooms: WatchableRoomInfo[]) => {
+      setWatchableRooms(rooms);
+    });
+
     socket.on("global:chat", (message: ChatMessage) => {
       setGlobalChatMessages(prev => {
         const next = [...prev, message];
@@ -218,6 +231,7 @@ export function useGame() {
       socket.off("game:trickResult");
       socket.off("game:roundEnd");
       socket.off("game:over");
+      socket.off("room:closed");
       socket.off("room:error");
       socket.off("game:playerQuit");
       socket.off("game:playerDisconnected");
@@ -229,6 +243,7 @@ export function useGame() {
       socket.off("vote:expired");
       socket.off("chat:message");
       socket.off("room:list");
+      socket.off("room:listWatchable");
       socket.off("global:chat");
       socket.off("reaction:new");
     };
@@ -256,6 +271,14 @@ export function useGame() {
     socket.emit("room:join", { roomId: rid, name });
     setRoomId(rid);
     // Session será salvo quando recebermos room:sessionInfo
+    const session = loadSession();
+    saveSession({ roomId: rid, sessionId: session?.sessionId ?? "", playerName: name });
+  }, []);
+
+  const joinAsSpectator = useCallback((code: string, name: string) => {
+    const rid = code.toUpperCase();
+    socket.emit("room:joinAsSpectator", { roomId: rid, name });
+    setRoomId(rid);
     const session = loadSession();
     saveSession({ roomId: rid, sessionId: session?.sessionId ?? "", playerName: name });
   }, []);
@@ -288,6 +311,7 @@ export function useGame() {
   const initiateVoteKick = useCallback(
     (targetId: string) => {
       socket.emit("vote:initiate", { roomId, targetId });
+      setVoteKickCooldownUntil(Date.now() + 60_000);
     },
     [roomId],
   );
@@ -330,6 +354,10 @@ export function useGame() {
     socket.emit("room:list");
   }, []);
 
+  const fetchWatchableRooms = useCallback(() => {
+    socket.emit("room:listWatchable");
+  }, []);
+
   const sendGlobalChat = useCallback((text: string) => {
     socket.emit("global:chat", { text });
   }, []);
@@ -343,6 +371,12 @@ export function useGame() {
       socket.emit("player:quit", { roomId });
       clearSession();
       setChatMessages([]);
+    }
+  }, [roomId]);
+
+  const becomeSpectator = useCallback(() => {
+    if (roomId) {
+      socket.emit("player:becomeSpectator", { roomId });
     }
   }, [roomId]);
 
@@ -365,8 +399,10 @@ export function useGame() {
     globalChatMessages,
     reactions,
     publicRooms,
+    watchableRooms,
     createRoom,
     joinRoom,
+    joinAsSpectator,
     startGame,
     placeBet,
     playCard,
@@ -385,6 +421,10 @@ export function useGame() {
     sendGlobalChat,
     sendReaction,
     fetchRooms,
+    fetchWatchableRooms,
     quitGame,
+    becomeSpectator,
+    voteKickCooldownUntil,
+    gameOverAt,
   };
 }
