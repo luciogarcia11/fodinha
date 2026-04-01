@@ -96,6 +96,7 @@ export function loadRoom(roomId: string): GameState | null {
   const config: GameConfig = {
     livesPerPlayer: configRow?.lives_per_player || 3,
     fdpRule: !!configRow?.fdp_rule,
+    fdpStartDoubleDeck: !!configRow?.fdp_start_double_deck,
     cardOnForeheadRule: !!configRow?.card_on_forehead_rule,
     suitTiebreakerRule: !!configRow?.suit_tiebreaker_rule,
     maxRounds: configRow?.max_rounds || 0,
@@ -113,6 +114,7 @@ export function loadRoom(roomId: string): GameState | null {
     hand: JSON.parse(row.hand),
     connected: !!row.connected,
     isEliminated: !!row.is_eliminated,
+    isSpectator: !!row.is_spectator,
     sessionId: row.session_id,
   }));
 
@@ -187,6 +189,7 @@ export function listPublicRooms(): Array<{
       config: {
         livesPerPlayer: row.lives_per_player || 3,
         fdpRule: !!row.fdp_rule,
+        fdpStartDoubleDeck: !!row.fdp_start_double_deck,
         cardOnForeheadRule: !!row.card_on_forehead_rule,
         suitTiebreakerRule: !!row.suit_tiebreaker_rule,
         maxRounds: row.max_rounds || 0,
@@ -201,6 +204,46 @@ function getPlayerCount(roomId: string): number {
   const stmt = db.prepare('SELECT COUNT(*) as count FROM players WHERE room_id = ?');
   const result = stmt.get(roomId) as any;
   return result?.count || 0;
+}
+
+// List public rooms in active game phases (for external spectators)
+export function listWatchableRoomsDB(): Array<{
+  roomId: string;
+  hostName: string;
+  phase: string;
+  playerCount: number;
+  maxPlayers: number;
+  config: GameConfig;
+}> {
+  const stmt = db.prepare(`
+    SELECT r.*, c.*
+    FROM rooms r
+    LEFT JOIN room_configs c ON r.id = c.room_id
+    WHERE r.phase NOT IN ('lobby', 'game_over') AND r.is_public = 1
+    ORDER BY r.last_activity DESC
+  `);
+
+  const rows = stmt.all() as any[];
+
+  return rows
+    .map(row => ({
+      roomId: row.id,
+      hostName: row.host_name,
+      phase: row.phase,
+      playerCount: getPlayerCount(row.id),
+      maxPlayers: 10,
+      config: {
+        livesPerPlayer: row.lives_per_player || 3,
+        fdpRule: !!row.fdp_rule,
+        fdpStartDoubleDeck: !!row.fdp_start_double_deck,
+        cardOnForeheadRule: !!row.card_on_forehead_rule,
+        suitTiebreakerRule: !!row.suit_tiebreaker_rule,
+        maxRounds: row.max_rounds || 0,
+        isPublic: true,
+        deckCount: (row.deck_count || 1) as 1 | 2,
+      },
+    }))
+    .filter(room => room.playerCount > 0);
 }
 
 // Ban player (persistent across sessions)
@@ -325,23 +368,24 @@ export function updateRoomActivity(roomId: string): void {
 }
 
 // Cleanup inactive rooms (more aggressive for empty lobbies)
-export function cleanupInactiveRooms(): number {
+// Returns the IDs of every room deleted from SQLite so callers can also purge in-memory state.
+export function cleanupInactiveRooms(): string[] {
   const oneHourAgo = Math.floor(Date.now() / 1000) - 3600;
   const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300; // 5 minutes
   
   // Remove empty lobby rooms older than 5 minutes (more aggressive)
-  const emptyLobbiesStmt = db.prepare(`
+  const emptyLobbiesResult = db.prepare(`
     DELETE FROM rooms 
     WHERE phase = 'lobby' 
     AND last_activity < ? 
     AND id NOT IN (
       SELECT DISTINCT room_id FROM players WHERE room_id IS NOT NULL
     )
-  `);
-  const emptyLobbiesResult = emptyLobbiesStmt.run(fiveMinutesAgo);
+    RETURNING id
+  `).all(fiveMinutesAgo) as { id: string }[];
   
   // Remove lobby rooms with only 1 player (host) older than 15 minutes
-  const singlePlayerStmt = db.prepare(`
+  const singlePlayerResult = db.prepare(`
     DELETE FROM rooms 
     WHERE phase = 'lobby' 
     AND last_activity < ? 
@@ -351,11 +395,11 @@ export function cleanupInactiveRooms(): number {
       GROUP BY room_id 
       HAVING COUNT(*) = 1
     )
-  `);
-  const singlePlayerResult = singlePlayerStmt.run(Math.floor(Date.now() / 1000) - 900); // 15 minutes
+    RETURNING id
+  `).all(Math.floor(Date.now() / 1000) - 900) as { id: string }[]; // 15 minutes
   
   // Remove other inactive rooms older than 1 hour
-  const inactiveStmt = db.prepare(`
+  const inactiveResult = db.prepare(`
     DELETE FROM rooms 
     WHERE last_activity < ? 
     AND phase = 'lobby'
@@ -365,35 +409,42 @@ export function cleanupInactiveRooms(): number {
       GROUP BY room_id 
       HAVING COUNT(*) > 1
     )
-  `);
-  const inactiveResult = inactiveStmt.run(oneHourAgo);
+    RETURNING id
+  `).all(oneHourAgo) as { id: string }[];
   
   // Remove salas que terminaram o jogo (game_over) após 5 minutos
-  const gameOverStmt = db.prepare(`
+  const gameOverResult = db.prepare(`
     DELETE FROM rooms 
     WHERE phase = 'game_over' 
     AND last_activity < ?
-  `);
-  const gameOverResult = gameOverStmt.run(fiveMinutesAgo);
+    RETURNING id
+  `).all(fiveMinutesAgo) as { id: string }[];
   
   // Remove salas em outras fases (betting, playing, round_end) sem jogadores conectados após 15 minutos
-  const otherPhasesStmt = db.prepare(`
+  const otherPhasesResult = db.prepare(`
     DELETE FROM rooms 
     WHERE phase IN ('betting', 'playing', 'round_end')
     AND last_activity < ?
     AND id NOT IN (
       SELECT DISTINCT room_id FROM players WHERE room_id IS NOT NULL AND connected = 1
     )
-  `);
-  const otherPhasesResult = otherPhasesStmt.run(Math.floor(Date.now() / 1000) - 900); // 15 minutos
+    RETURNING id
+  `).all(Math.floor(Date.now() / 1000) - 900) as { id: string }[]; // 15 minutos
   
-  const totalChanges = emptyLobbiesResult.changes + singlePlayerResult.changes + inactiveResult.changes + gameOverResult.changes + otherPhasesResult.changes;
-  
+  const deletedIds = [
+    ...emptyLobbiesResult,
+    ...singlePlayerResult,
+    ...inactiveResult,
+    ...gameOverResult,
+    ...otherPhasesResult,
+  ].map(r => r.id);
+
+  const totalChanges = deletedIds.length;
   if (totalChanges > 0) {
-    console.log(`🧹 Salas inativas removidas: ${emptyLobbiesResult.changes} lobbies vazios + ${singlePlayerResult.changes} lobbies com 1 jogador + ${inactiveResult.changes} lobbies antigos + ${gameOverResult.changes} game_over + ${otherPhasesResult.changes} outras fases = ${totalChanges} total`);
+    console.log(`🧹 Salas inativas removidas: ${emptyLobbiesResult.length} lobbies vazios + ${singlePlayerResult.length} lobbies com 1 jogador + ${inactiveResult.length} lobbies antigos + ${gameOverResult.length} game_over + ${otherPhasesResult.length} outras fases = ${totalChanges} total`);
   }
   
-  return totalChanges;
+  return deletedIds;
 }
 
 // Get room last activity timestamp

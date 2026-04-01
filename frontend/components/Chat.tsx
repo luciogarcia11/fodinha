@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChatMessage } from "@/lib/types";
+import { ChatMessage, Player } from "@/lib/types";
 
 import EmojiPicker, { Theme, EmojiClickData } from 'emoji-picker-react';
 
@@ -10,11 +10,13 @@ export default function Chat({
   send,
   compact = false,
   global = false,
+  players,
 }: {
   messages: ChatMessage[];
   send: (text: string) => void;
   compact?: boolean;
   global?: boolean;
+  players?: Player[];
 }) {
   const [text, setText] = useState("");
   const [isCollapsed, setIsCollapsed] = useState(global);
@@ -59,11 +61,14 @@ export default function Chat({
 
       {!isCollapsed && (
         <>
-          <div ref={listRef} className="flex-1 overflow-y-auto max-h-48 space-y-3 p-3 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+          <div ref={listRef} className="flex-1 overflow-y-auto max-h-80 space-y-3 p-3 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
             {messages.map((m) => (
               <div key={m.id} className="text-[13px] leading-tight flex flex-col gap-0.5">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-yellow-400/90 font-bold truncate">{m.playerName}</span>
+                  <span className="text-yellow-400/90 font-bold truncate">
+                    {players?.find(p => p.id === m.playerId)?.isSpectator && <span className="text-indigo-400 mr-0.5" title="Espectador">[👁️]</span>}
+                    {m.playerName}
+                  </span>
                   <span className="text-white/30 text-[9px] whitespace-nowrap">
                     {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : m.createdAt ? new Date(m.createdAt * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                   </span>

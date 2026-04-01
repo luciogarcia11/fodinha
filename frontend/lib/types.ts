@@ -22,12 +22,14 @@ export interface Player {
   hand: Card[];
   connected: boolean;
   isEliminated: boolean;
+  isSpectator: boolean;
   sessionId: string;
 }
 
 export interface GameConfig {
   livesPerPlayer: number;
   fdpRule: boolean;
+  fdpStartDoubleDeck: boolean;
   cardOnForeheadRule: boolean;
   suitTiebreakerRule: boolean;
   maxRounds: number;
@@ -115,6 +117,16 @@ export interface PublicRoomInfo {
   roomId: string;
   hostName: string;
   playerCount: number;
+  maxPlayers: number;
+  config: GameConfig;
+}
+
+export interface WatchableRoomInfo {
+  roomId: string;
+  hostName: string;
+  phase: string;
+  playerCount: number;
+  spectatorCount: number;
   maxPlayers: number;
   config: GameConfig;
 }
