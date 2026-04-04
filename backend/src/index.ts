@@ -617,7 +617,7 @@ io.on("connection", (socket) => {
       targetName: target.name,
       initiatorName: state.players.find(p => p.id === socket.id)?.name ?? "Jogador",
       votes: state.activeVoteKick.votes.length,
-      needed: Math.ceil(state.players.filter(p => !p.isEliminated).length / 2),
+    needed: Math.floor(state.players.filter(p => !p.isEliminated).length / 2) + 1,
     });
 
     // Timer de 30s para expirar votação
@@ -644,7 +644,7 @@ io.on("connection", (socket) => {
     vote.votes.push(socket.id);
 
     const activePlayers = state.players.filter(p => !p.isEliminated);
-    const needed = Math.ceil(activePlayers.length / 2);
+    const needed = Math.floor(activePlayers.length / 2) + 1;
 
     io.to(roomId).emit("vote:update", {
       votes: vote.votes.length,

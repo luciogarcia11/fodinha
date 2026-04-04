@@ -66,6 +66,7 @@ function GameContent() {
   const [showVoteKickTarget, setShowVoteKickTarget] = useState<string | null>(
     null,
   );
+  const [expandedSpectatorPlayers, setExpandedSpectatorPlayers] = useState<Set<string>>(new Set());
   const [trickResultVisible, setTrickResultVisible] = useState<boolean>(false);
   const [prevTrickResult, setPrevTrickResult] = useState<TrickResult | null>(
     null,
@@ -368,11 +369,26 @@ function GameContent() {
             ))}
           </div>
         ) : (gameState!.players.find(p => p.id === myId)?.isSpectator) ? (
-          // Espectador vê todas as cartas abertas
-          <div className="flex gap-0.5 flex-wrap justify-center max-w-[70px] md:max-w-[90px]">
-            {player.hand.map((card, i) => (
-              <CardComponent key={i} card={card} hidden={false} small />
-            ))}
+          // Espectador: leque clicável → expande para ver cartas abertas
+          <div
+            className="cursor-pointer"
+            title={expandedSpectatorPlayers.has(player.id) ? "Colapsar cartas" : "Expandir cartas"}
+            onClick={() => setExpandedSpectatorPlayers(prev => {
+              const next = new Set(prev);
+              if (next.has(player.id)) next.delete(player.id);
+              else next.add(player.id);
+              return next;
+            })}
+          >
+            {expandedSpectatorPlayers.has(player.id) ? (
+              <div className="flex gap-0.5 flex-wrap justify-center max-w-[70px] md:max-w-[90px]">
+                {player.hand.map((card, i) => (
+                  <CardComponent key={i} card={card} hidden={false} small />
+                ))}
+              </div>
+            ) : (
+              <FanCards count={player.hand.length} hand={player.hand} />
+            )}
           </div>
         ) : (
           <FanCards count={player.hand.length} hand={player.hand} />
@@ -675,20 +691,22 @@ function GameContent() {
           )}
 
           <div className="flex gap-1.5 md:gap-2 flex-wrap justify-center px-2 md:px-4">
-            {me.hand.map((card, idx) => (
-              <CardComponent
-                key={idx}
-                card={card}
-                hidden={isCardOnForehead || hideMyCards}
-                selected={selectedCard === idx}
-                onClick={
-                  isMyTurn && gameState.phase === "playing"
-                    ? () => handleCardClick(idx)
-                    : undefined
-                }
-                disabled={false}
-              />
-            ))}
+            {[...Array(me.hand.length).keys()]
+              .sort((a, b) => me.hand[b].strength - me.hand[a].strength)
+              .map((idx) => (
+                <CardComponent
+                  key={idx}
+                  card={me.hand[idx]}
+                  hidden={isCardOnForehead || hideMyCards}
+                  selected={selectedCard === idx}
+                  onClick={
+                    isMyTurn && gameState.phase === "playing"
+                      ? () => handleCardClick(idx)
+                      : undefined
+                  }
+                  disabled={false}
+                />
+              ))}
           </div>
         </div>
       )}
