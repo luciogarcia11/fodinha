@@ -14,7 +14,7 @@ export default function RoomsPage() {
     fetchRooms();
     fetchWatchableRooms();
     // Polling as fallback; real-time updates come via socket broadcasts
-    const interval = setInterval(() => { fetchRooms(); fetchWatchableRooms(); }, 8000);
+    const interval = setInterval(() => { fetchRooms(); fetchWatchableRooms(); }, 4000);
     return () => clearInterval(interval);
   }, [fetchRooms, fetchWatchableRooms]);
 

@@ -82,7 +82,12 @@ setInterval(() => {
 setInterval(() => {
   const deletedIds = cleanupInactiveRooms();
   for (const roomId of deletedIds) {
+    cancelLobbyTimer(roomId);
+    cancelGameOverTimer(roomId);
     deleteRoom(roomId); // idempotent: no-op if already removed from memory
+  }
+  if (deletedIds.length > 0) {
+    io.emit("room:list", listPublicRooms());
   }
 }, 15000);
 
@@ -719,6 +724,10 @@ io.on("connection", (socket) => {
     const state = getRoom(roomId);
     if (!state || state.activeVoteKick) return;
 
+    // Spectators cannot initiate votekick
+    const initiator = state.players.find(p => p.id === socket.id);
+    if (!initiator || initiator.isSpectator || initiator.isEliminated) return;
+
     // Cooldown de 60s por socket para evitar spam
     const lastInitiated = voteInitiateCooldowns.get(socket.id) ?? 0;
     if (Date.now() - lastInitiated < 60_000) {
@@ -727,7 +736,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const target = state.players.find(p => p.id === targetId && !p.isEliminated);
+    const target = state.players.find(p => p.id === targetId && !p.isEliminated && !p.isSpectator);
     if (!target || target.id === socket.id) return;
 
     voteInitiateCooldowns.set(socket.id, Date.now());
@@ -743,7 +752,7 @@ io.on("connection", (socket) => {
       targetName: target.name,
       initiatorName: state.players.find(p => p.id === socket.id)?.name ?? "Jogador",
       votes: state.activeVoteKick.votes.length,
-    needed: Math.floor(state.players.filter(p => !p.isEliminated).length / 2) + 1,
+      needed: Math.floor(state.players.filter(p => !p.isEliminated && !p.isSpectator).length / 2) + 1,
     });
 
     // Timer de 30s para expirar votação
@@ -763,13 +772,17 @@ io.on("connection", (socket) => {
     const state = getRoom(roomId);
     if (!state || !state.activeVoteKick) return;
 
+    // Spectators cannot vote
+    const voter = state.players.find(p => p.id === socket.id);
+    if (!voter || voter.isSpectator || voter.isEliminated) return;
+
     const vote = state.activeVoteKick;
     if (vote.votes.includes(socket.id)) return;
     if (socket.id === vote.targetId) return;
 
     vote.votes.push(socket.id);
 
-    const activePlayers = state.players.filter(p => !p.isEliminated);
+    const activePlayers = state.players.filter(p => !p.isEliminated && !p.isSpectator);
     const needed = Math.floor(activePlayers.length / 2) + 1;
 
     io.to(roomId).emit("vote:update", {
@@ -971,6 +984,8 @@ io.on("connection", (socket) => {
       const player = state.players.find(p => p.id === socket.id);
       socket.emit("room:sessionInfo", { sessionId: player?.sessionId });
       io.to(validatedRoomId).emit("game:stateUpdate", state);
+      // Broadcast updated watchable rooms (spectator count changed)
+      io.emit("room:listWatchable", listWatchableRooms());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao entrar como espectador';
       socket.emit("room:error", { message });

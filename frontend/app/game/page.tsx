@@ -245,14 +245,44 @@ function GameContent() {
     const winner = gameState.players.find((p) => p.id === winnerId);
     const mm = String(Math.floor(gameOverCountdown / 60)).padStart(2, '0');
     const ss = String(gameOverCountdown % 60).padStart(2, '0');
+    // All non-spectator players sorted: winner first, then by lives (desc), then eliminated
+    const allGamePlayers = gameState.players
+      .filter(p => !p.isSpectator)
+      .sort((a, b) => {
+        if (a.id === winnerId) return -1;
+        if (b.id === winnerId) return 1;
+        if (a.isEliminated !== b.isEliminated) return a.isEliminated ? 1 : -1;
+        return b.lives - a.lives;
+      });
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center gap-6">
+      <main className="min-h-screen flex flex-col items-center justify-center gap-6 p-4">
         <h1 className="text-4xl md:text-5xl font-black text-yellow-400">
           🏆 Fim de Jogo!
         </h1>
         <p className="text-xl md:text-2xl text-white">
           {winner?.id === myId ? "🎉 Você venceu!" : `${winner?.name} venceu!`}
         </p>
+
+        {/* Resumo final de todos os jogadores */}
+        <div className="bg-white/10 rounded-2xl p-4 w-full max-w-sm">
+          <h3 className="text-sm font-bold text-white/60 mb-2 text-center">Classificação Final</h3>
+          <div className="flex flex-col gap-1.5">
+            {allGamePlayers.map((p, i) => (
+              <div key={p.id} className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-xs
+                ${p.id === winnerId ? "bg-yellow-400/20 border border-yellow-400/40" : p.isEliminated ? "bg-white/5 opacity-60" : "bg-white/5"}`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-white/40 w-4 text-right">{i + 1}.</span>
+                  {p.id === winnerId && <span>🏆</span>}
+                  {p.isEliminated && p.id !== winnerId && <span>💀</span>}
+                  <span className="font-medium">{p.name}</span>
+                  {p.id === myId && <span className="text-yellow-400 text-[10px]">(você)</span>}
+                </div>
+                <span className="text-white/40">{p.isEliminated ? "Eliminado" : `${p.lives} ♥`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <p className="text-white/40 text-sm">
           Sala fecha em <span className="font-mono text-white/70">{mm}:{ss}</span>
         </p>
@@ -280,17 +310,36 @@ function GameContent() {
     for (let i = 1; i < n; i++) {
       const id = playOrder[(myOrderIndex + i) % n];
       const p = gameState.players.find((p) => p.id === id);
-      if (p) result.push(p);
+      if (p && !p.isEliminated && !p.isSpectator) result.push(p);
     }
-    // Jogadores não presentes no bettingOrder (ex: eliminados) ficam no final
-    gameState.players.forEach((p) => {
-      if (p.id !== myId && !result.find((r) => r.id === p.id)) result.push(p);
-    });
     return result;
   })();
   const others = othersOrdered;
-  const activePlayers = gameState.players.filter((p) => !p.isEliminated);
+  const activePlayers = gameState.players.filter((p) => !p.isEliminated && !p.isSpectator);
   const isMyTurn = gameState.currentTurn === myId;
+
+  // Dynamic sizing based on player count (for mobile responsiveness)
+  const totalActive = activePlayers.length;
+  const seatSize = totalActive <= 4
+    ? "min-w-[60px] md:min-w-[80px] max-w-[80px] md:max-w-[100px] p-1.5 md:p-2"
+    : totalActive <= 8
+      ? "min-w-[50px] md:min-w-[70px] max-w-[65px] md:max-w-[90px] p-1 md:p-1.5"
+      : totalActive <= 12
+        ? "min-w-[42px] md:min-w-[60px] max-w-[55px] md:max-w-[80px] p-0.5 md:p-1"
+        : "min-w-[36px] md:min-w-[50px] max-w-[48px] md:max-w-[70px] p-0.5 md:p-1";
+  const seatTextSize = totalActive <= 8
+    ? "text-[10px] md:text-xs"
+    : "text-[8px] md:text-[10px]";
+  const seatNameMax = totalActive <= 8
+    ? "max-w-[60px] md:max-w-[80px]"
+    : "max-w-[40px] md:max-w-[60px]";
+  // Dynamic card sizes for table and hand
+  const useSmallTableCards = totalActive > 6;
+  const handCardSize = totalActive <= 6
+    ? ""
+    : totalActive <= 10
+      ? "scale-90 origin-bottom"
+      : "scale-[0.8] origin-bottom";
 
   const isCardOnForehead =
     gameState.config.cardOnForeheadRule && gameState.cardsThisRound === 1;
@@ -342,47 +391,46 @@ function GameContent() {
     const showOtherCards = isCardOnForehead && !player.isEliminated;
     const isHost = gameState!.hostId === myId;
     const isMe = player.id === myId;
+    const mePlayer = gameState!.players.find(p => p.id === myId);
+    const canInteract = !mePlayer?.isSpectator && !mePlayer?.isEliminated;
     const showControls = showVoteKickTarget === player.id;
 
     return (
       <div
-        className={`flex flex-col items-center gap-1 p-1.5 md:p-2 rounded-xl transition-all
-        min-w-[60px] md:min-w-[80px] max-w-[80px] md:max-w-[100px]
+        className={`flex flex-col items-center gap-0.5 rounded-xl transition-all
+        ${seatSize}
         ${isActive ? "bg-yellow-400/20 ring-2 ring-yellow-400" : "bg-white/5"}
-        ${player.isEliminated ? "opacity-40" : ""}
       `}
       >
         <div className="flex items-center gap-0.5">
           {isDealer && (
-            <span className="text-[10px] md:text-xs" title="Pé">
+            <span className={`${seatTextSize}`} title="Pé">
               🦶
             </span>
           )}
           <span
-            className="text-[10px] md:text-xs font-bold text-white/80 truncate max-w-[60px] md:max-w-[80px] cursor-pointer"
+            className={`${seatTextSize} font-bold text-white/80 truncate ${seatNameMax} ${canInteract && !isMe ? "cursor-pointer" : ""}`}
             onClick={() =>
+              canInteract &&
               !isMe &&
-              !player.isEliminated &&
               setShowVoteKickTarget(showControls ? null : player.id)
             }
           >
             {player.name}
           </span>
         </div>
-        <div className="text-[10px] md:text-xs">
+        <div className={seatTextSize}>
           {renderLives(player.lives, gameState!.config.livesPerPlayer)}
         </div>
         {bet !== undefined && (
-          <div className="text-[10px] md:text-xs text-yellow-300 font-mono">
+          <div className={`${seatTextSize} text-yellow-300 font-mono`}>
             {taken}/{bet}
           </div>
         )}
         {cardOnTable ? (
           <CardComponent card={cardOnTable.card} small />
-        ) : player.isEliminated ? (
-          <span className="text-[10px] text-red-400 font-bold mt-1">💀</span>
         ) : showOtherCards ? (
-          <div className="flex gap-0.5 flex-wrap justify-center max-w-[70px] md:max-w-[90px]">
+          <div className={`flex gap-0.5 flex-wrap justify-center ${seatNameMax}`}>
             {player.hand.map((card, i) => (
               <CardComponent key={i} card={card} hidden={false} small />
             ))}
@@ -400,7 +448,7 @@ function GameContent() {
             })}
           >
             {expandedSpectatorPlayers.has(player.id) ? (
-              <div className="flex gap-0.5 flex-wrap justify-center max-w-[70px] md:max-w-[90px]">
+              <div className={`flex gap-0.5 flex-wrap justify-center ${seatNameMax}`}>
                 {player.hand.map((card, i) => (
                   <CardComponent key={i} card={card} hidden={false} small />
                 ))}
@@ -413,7 +461,7 @@ function GameContent() {
           <FanCards count={player.hand.length} hand={player.hand} />
         )}
         {/* Player action menu */}
-        {showControls && !isMe && !player.isEliminated && (
+        {showControls && canInteract && !isMe && (
           <div className="flex flex-col gap-1 mt-1">
             <button
               onClick={() => {
@@ -519,8 +567,9 @@ function GameContent() {
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 md:gap-3 px-2 md:px-4 pointer-events-none">
           {/* Cartas na mesa */}
           <div
-            className="flex gap-2 md:gap-3 flex-wrap justify-center min-h-20 md:min-h-24 items-center
-            bg-green-900/40 rounded-2xl px-4 md:px-6 py-3 md:py-4 max-w-xs md:max-w-sm border border-green-700/30 pointer-events-auto"
+            className={`flex gap-1.5 md:gap-3 flex-wrap justify-center items-center
+            bg-green-900/40 rounded-2xl px-3 md:px-6 py-2 md:py-4 border border-green-700/30 pointer-events-auto
+            ${useSmallTableCards ? "min-h-16 md:min-h-20 max-w-[280px] md:max-w-sm" : "min-h-20 md:min-h-24 max-w-xs md:max-w-sm"}`}
           >
             {gameState.currentTrick.length > 0 ? (
               gameState.currentTrick.map((t) => {
@@ -532,14 +581,15 @@ function GameContent() {
                 return (
                   <div
                     key={t.playerId}
-                    className="flex flex-col items-center gap-1"
+                    className="flex flex-col items-center gap-0.5"
                   >
                     <CardComponent
                       card={t.card}
                       isWinning={isWinning}
                       isTied={isTied}
+                      small={useSmallTableCards}
                     />
-                    <span className="text-[10px] md:text-xs text-white/50">
+                    <span className={`${seatTextSize} text-white/50`}>
                       {gameState.players.find((p) => p.id === t.playerId)?.name}
                     </span>
                   </div>
@@ -709,7 +759,7 @@ function GameContent() {
             </p>
           )}
 
-          <div className="flex gap-1.5 md:gap-2 flex-wrap justify-center px-2 md:px-4">
+          <div className={`flex gap-1.5 md:gap-2 flex-wrap justify-center px-2 md:px-4 ${handCardSize}`}>
             {[...Array(me.hand.length).keys()]
               .sort((a, b) => me.hand[b].strength - me.hand[a].strength)
               .map((idx) => (
@@ -971,7 +1021,9 @@ function GameContent() {
               Resultado — Rodada {gameState.round}
             </h2>
             <div className="flex flex-col gap-2">
-              {roundEnd.players.map((p) => {
+              {roundEnd.players
+                .filter((p) => !p.isSpectator)
+                .map((p) => {
                 const bet = roundEnd.bets[p.id] ?? 0;
                 const taken = roundEnd.tricksTaken[p.id] ?? 0;
                 const acertou = bet === taken;

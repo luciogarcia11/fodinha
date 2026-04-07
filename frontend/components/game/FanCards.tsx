@@ -29,7 +29,7 @@ export default function FanCards({ count, hand }: { count: number; hand?: Card[]
           <div
             key={i}
             className={`absolute bottom-0 w-8 h-12 border-2 rounded-lg flex items-center justify-center shadow-md
-              ${hand?.[i]?.deckColor === 'red' ? 'bg-red-800 border-red-600' : 'bg-blue-800 border-blue-600'}`}
+              ${hand?.[i]?.deckColor === 'red' ? 'bg-red-800 border-red-600' : hand?.[i]?.deckColor === 'green' ? 'bg-green-800 border-green-600' : 'bg-blue-800 border-blue-600'}`}
             style={{
               transform: `rotate(${angle}deg) translateX(${translateX}px)`,
               transformOrigin: 'bottom center',
@@ -37,8 +37,8 @@ export default function FanCards({ count, hand }: { count: number; hand?: Card[]
             }}
           >
             <div className={`w-5 h-8 border rounded flex items-center justify-center
-              ${hand?.[i]?.deckColor === 'red' ? 'border-red-500' : 'border-blue-500'}`}>
-              <span className={`text-xs ${hand?.[i]?.deckColor === 'red' ? 'text-red-400' : 'text-blue-400'}`}>🂠</span>
+              ${hand?.[i]?.deckColor === 'red' ? 'border-red-500' : hand?.[i]?.deckColor === 'green' ? 'border-green-500' : 'border-blue-500'}`}>
+              <span className={`text-xs ${hand?.[i]?.deckColor === 'red' ? 'text-red-400' : hand?.[i]?.deckColor === 'green' ? 'text-green-400' : 'text-blue-400'}`}>🂠</span>
             </div>
           </div>
         );
