@@ -84,7 +84,7 @@ export default function Home() {
           </button>
           <button
             onClick={() => router.push('/rooms')}
-            className="bg-green-600/80 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-xl text-lg transition-all border border-green-500/50"
+            className="bg-green-600/80 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-xl text-xl transition-all border border-green-500/50"
           >
             Salas Públicas
           </button>
