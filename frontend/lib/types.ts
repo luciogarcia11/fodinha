@@ -24,6 +24,7 @@ export interface Player {
   isEliminated: boolean;
   isSpectator: boolean;
   sessionId: string;
+  wasKicked: boolean;
 }
 
 export interface GameConfig {
@@ -35,6 +36,7 @@ export interface GameConfig {
   maxRounds: number;
   isPublic: boolean;
   deckCount: 1 | 2;  // Número de baralhos (1 ou 2)
+  maxPlayers: number;
 }
 
 export interface ChatMessage {
@@ -86,6 +88,7 @@ export interface GameState {
   trickState: TrickState | null;
   activeVoteKick: VoteKick | null;
   bannedIds: string[];
+  spectatorQueue: string[];
 }
 
 export interface TrickResult {
