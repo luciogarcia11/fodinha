@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 function LobbyContent() {
-  const { gameState, myId, startGame, updateConfig, roomId, chatMessages, sendChat, globalChatMessages, sendGlobalChat } = useGameContext();
+  const { gameState, myId, startGame, updateConfig, roomId, chatMessages, sendChat, globalChatMessages, sendGlobalChat, quitGame } = useGameContext();
   const router = useRouter();
   const searchParams = useSearchParams();
   const roomCode = searchParams.get("room") ?? roomId;
@@ -48,7 +48,7 @@ function LobbyContent() {
 
       <div className="bg-white/10 rounded-2xl p-4 w-full max-w-sm">
         <h2 className="font-bold text-lg mb-3">
-          Jogadores ({gameState.players.length}/10)
+          Jogadores ({gameState.players.length}/{gameState.config.maxPlayers ?? 10})
         </h2>
         <div className="flex flex-col gap-2">
           {gameState.players.map((p) => (
@@ -177,6 +177,29 @@ function LobbyContent() {
           </div>
 
           <div className="flex items-center justify-between">
+            <span className="text-sm">Máx. Jogadores</span>
+            {isHost ? (
+              <select
+                className="bg-white/20 text-white rounded px-2 py-1 text-sm"
+                value={gameState.config.maxPlayers ?? 10}
+                onChange={(e) =>
+                  updateConfig({ maxPlayers: Number(e.target.value) })
+                }
+              >
+                {Array.from({ length: 13 }, (_, i) => i + 2).map((n) => (
+                  <option key={n} value={n} className="text-gray-900">
+                    {n}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-yellow-400 font-bold text-sm">
+                {gameState.config.maxPlayers ?? 10}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between">
             <span className="text-sm">Sala Pública</span>
             {isHost ? (
               <input
@@ -226,12 +249,12 @@ function LobbyContent() {
       )}
 
       {/* Botão de sair da sala */}
-      <a
-        href="http://fodinhamineira.vercel.app/"
+      <button
+        onClick={() => { quitGame(); router.push("/"); }}
         className="w-full max-w-sm bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl text-center transition-all shadow-lg flex items-center justify-center gap-2"
       >
         🏠 Sair da Sala
-      </a>
+      </button>
     </main>
   );
 }
