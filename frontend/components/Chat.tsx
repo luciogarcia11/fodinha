@@ -21,11 +21,30 @@ export default function Chat({
   const [text, setText] = useState("");
   const [isCollapsed, setIsCollapsed] = useState(global);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [lastReadCount, setLastReadCount] = useState(messages.length);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const dividerRef = useRef<HTMLDivElement | null>(null);
+
+  const unreadCount = isCollapsed ? messages.length - lastReadCount : 0;
 
   useEffect(() => {
-    if (listRef.current && !isCollapsed) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
+    if (!isCollapsed) {
+      // When expanded, scroll to divider if exists, otherwise scroll to bottom
+      if (dividerRef.current) {
+        dividerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else if (listRef.current) {
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+      }
+    }
+  }, [isCollapsed]);
+
+  useEffect(() => {
+    if (!isCollapsed) {
+      // Mark all as read when open and new messages arrive
+      setLastReadCount(messages.length);
+      if (listRef.current) {
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+      }
     }
   }, [messages, isCollapsed]);
 
@@ -44,17 +63,22 @@ export default function Chat({
   if (isCollapsed) {
     return (
       <button
-        className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/70 border border-white/20 shadow-xl flex items-center justify-center transition-all backdrop-blur-md"
+        className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/70 border border-white/20 shadow-xl flex items-center justify-center transition-all backdrop-blur-md relative"
         onClick={() => setIsCollapsed(false)}
         title="Abrir chat"
       >
         <span className="text-xl">{global ? "🌐" : "💬"}</span>
+        {unreadCount > 0 && (
+          <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+            {unreadCount > 99 ? "99+" : unreadCount}
+          </span>
+        )}
       </button>
     );
   }
 
   return (
-    <div className={`flex flex-col bg-black/30 rounded-xl ${compact ? "w-60" : "w-80"} shadow-xl border border-white/10 backdrop-blur-md transition-all`}>
+    <div className={`flex flex-col bg-black/20 rounded-xl ${compact ? "w-60" : "w-80"} shadow-xl border border-white/10 backdrop-blur-md transition-all`}>
       {/* Header com botão de colapsar */}
       <div 
         className="flex items-center justify-between px-3 py-2 border-b border-white/10 cursor-pointer hover:bg-white/5 transition-colors rounded-t-xl"
@@ -72,8 +96,16 @@ export default function Chat({
       </div>
 
       <div ref={listRef} className="flex-1 overflow-y-auto max-h-80 space-y-3 p-3 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
-        {messages.map((m) => (
-          <div key={m.id} className="text-[13px] leading-tight flex flex-col gap-0.5">
+        {messages.map((m, i) => (
+          <div key={m.id}>
+            {i === lastReadCount && lastReadCount > 0 && lastReadCount < messages.length && (
+              <div ref={dividerRef} className="flex items-center gap-2 my-2">
+                <div className="flex-1 h-px bg-red-400/50" />
+                <span className="text-red-400/70 text-[10px] font-bold uppercase">Novas</span>
+                <div className="flex-1 h-px bg-red-400/50" />
+              </div>
+            )}
+            <div className="text-[13px] leading-tight flex flex-col gap-0.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-yellow-400/90 font-bold truncate">
                 {players?.find(p => p.id === m.playerId)?.isSpectator && <span className="text-indigo-400 mr-0.5" title="Espectador">[👁️]</span>}
@@ -84,6 +116,7 @@ export default function Chat({
               </span>
             </div>
             <div className="text-white/90 break-words">{m.text}</div>
+            </div>
           </div>
         ))}
         {messages.length === 0 && (
