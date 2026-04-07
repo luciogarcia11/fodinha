@@ -33,7 +33,9 @@ export const SUIT_STRENGTH: Record<Suit, number> = {
   'diamonds': 1,
 };
 
-export function buildDeck(deckColor: 'blue' | 'red' | 'green' = 'blue'): Card[] {
+export type DeckColor = 'blue' | 'red' | 'green' | 'yellow' | 'brown' | 'black' | 'white';
+
+export function buildDeck(deckColor: DeckColor = 'blue'): Card[] {
   const deck: Card[] = [];
 
   for (const suit of SUITS) {
@@ -69,19 +71,21 @@ export function dealCards(deck: Card[], playerCount: number, cardsPerPlayer: num
   return hands;
 }
 
-/** Cores dos baralhos na ordem de escala */
-const DECK_COLORS: Array<'blue' | 'red' | 'green'> = ['blue', 'red', 'green'];
+/** Cores dos baralhos na ordem de escala (7 cores para modo insanidade) */
+const DECK_COLORS: DeckColor[] = ['blue', 'red', 'green', 'yellow', 'brown', 'black', 'white'];
 
 export const CARDS_PER_DECK = 40;
 export const MAX_DECKS = 3;
 export const MAX_TOTAL_CARDS = MAX_DECKS * CARDS_PER_DECK; // 120
+export const INSANITY_MAX_DECKS = 7;
+export const INSANITY_MAX_TOTAL_CARDS = INSANITY_MAX_DECKS * CARDS_PER_DECK; // 280
 
 /**
- * Cria N baralhos com cores distintas (azul, vermelho, verde).
- * @param count Número de baralhos (1-3)
+ * Cria N baralhos com cores distintas.
+ * @param count Número de baralhos (1-7; máx real definido pelo chamador)
  */
 export function buildMultiDeck(count: number = 2): Card[] {
-  const n = Math.min(MAX_DECKS, Math.max(1, count));
+  const n = Math.min(INSANITY_MAX_DECKS, Math.max(1, count));
   const cards: Card[] = [];
   for (let i = 0; i < n; i++) {
     cards.push(...buildDeck(DECK_COLORS[i]));

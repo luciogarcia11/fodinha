@@ -30,9 +30,23 @@ export default function CardComponent({
     : 'w-16 h-24 rounded-lg text-sm';
 
   if (hidden || !card) {
-    const backColor = card?.deckColor === 'red' ? 'red' : card?.deckColor === 'green' ? 'green' : 'blue';
-    const backBg = backColor === 'red' ? 'bg-red-800 border-red-600' : backColor === 'green' ? 'bg-green-800 border-green-600' : 'bg-blue-800 border-blue-600';
-    const backText = backColor === 'red' ? 'text-red-400' : backColor === 'green' ? 'text-green-400' : 'text-blue-400';
+    const c = card?.deckColor ?? 'blue';
+    const backBg =
+      c === 'red'    ? 'bg-red-800 border-red-600' :
+      c === 'green'  ? 'bg-green-800 border-green-600' :
+      c === 'yellow' ? 'bg-yellow-700 border-yellow-500' :
+      c === 'brown'  ? 'bg-amber-900 border-amber-700' :
+      c === 'black'  ? 'bg-gray-900 border-gray-600' :
+      c === 'white'  ? 'bg-gray-200 border-gray-400' :
+                       'bg-blue-800 border-blue-600';
+    const backText =
+      c === 'red'    ? 'text-red-400' :
+      c === 'green'  ? 'text-green-400' :
+      c === 'yellow' ? 'text-yellow-300' :
+      c === 'brown'  ? 'text-amber-500' :
+      c === 'black'  ? 'text-gray-400' :
+      c === 'white'  ? 'text-gray-600' :
+                       'text-blue-400';
     return (
       <motion.div
         className={`${base} ${backBg} border-2 flex items-center justify-center select-none ${onClick && !disabled ? 'cursor-pointer' : 'cursor-default'}`}
@@ -48,12 +62,23 @@ export default function CardComponent({
   const suitSymbol = SUIT_SYMBOLS[card.suit];
   const suitColor = SUIT_COLORS[card.suit];
   
-  const isRedDeck = card.deckColor === 'red';
-  const isBlueDeck = card.deckColor === 'blue';
-  const isGreenDeck = card.deckColor === 'green';
-
-  const defaultBg = isRedDeck ? 'bg-red-50' : isGreenDeck ? 'bg-green-50' : (isBlueDeck ? 'bg-blue-50' : 'bg-white');
-  const defaultBorder = isRedDeck ? 'border-red-400' : isGreenDeck ? 'border-green-400' : (isBlueDeck ? 'border-blue-400' : 'border-gray-300');
+  const c = card.deckColor ?? 'blue';
+  const defaultBg =
+    c === 'red'    ? 'bg-red-50' :
+    c === 'green'  ? 'bg-green-50' :
+    c === 'yellow' ? 'bg-yellow-50' :
+    c === 'brown'  ? 'bg-amber-50' :
+    c === 'black'  ? 'bg-gray-100' :
+    c === 'white'  ? 'bg-white' :
+                     'bg-blue-50';
+  const defaultBorder =
+    c === 'red'    ? 'border-red-400' :
+    c === 'green'  ? 'border-green-400' :
+    c === 'yellow' ? 'border-yellow-400' :
+    c === 'brown'  ? 'border-amber-600' :
+    c === 'black'  ? 'border-gray-600' :
+    c === 'white'  ? 'border-gray-400' :
+                     'border-blue-400';
 
   return (
     <motion.div

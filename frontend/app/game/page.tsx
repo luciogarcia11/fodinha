@@ -504,13 +504,17 @@ function GameContent() {
   // Calcula posições absolutas dos jogadores ao redor da mesa.
   // Ângulos: +120° (direita) a -120° (esquerda), passando por 0° (topo).
   // O jogador na posição 0 da lista fica na DIREITA (próximo a jogar) → sentido anti-horário.
+  // O arco se expande graciosamente conforme o número de jogadores aumenta,
+  // evitando clustering visual nas extremidades com 14+ jogadores.
   function getPlayerPositions(
     count: number,
   ): { top: string; left: string; transform: string }[] {
     if (count === 0) return [];
     const positions: { top: string; left: string; transform: string }[] = [];
-    const startDeg = 120;
-    const endDeg = -120;
+    // Arco base 240° para até 6 jogadores; expande +5° por jogador extra, até 300°.
+    const arcSpan = Math.min(240 + Math.max(0, count - 6) * 5, 300);
+    const startDeg = arcSpan / 2;
+    const endDeg = -arcSpan / 2;
     for (let i = 0; i < count; i++) {
       const deg =
         count === 1 ? 0 : startDeg + (i * (endDeg - startDeg)) / (count - 1);

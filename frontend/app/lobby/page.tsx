@@ -159,6 +159,42 @@ function LobbyContent() {
             </div>
           )}
 
+          {/* Escala de baralhos */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm">Usar somente 2 baralhos</span>
+            {isHost ? (
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-yellow-400"
+                checked={gameState.config.forceTwoDecks ?? false}
+                onChange={(e) => updateConfig({ forceTwoDecks: e.target.checked, insanityMode: false })}
+              />
+            ) : (
+              <span className={`text-sm font-bold ${gameState.config.forceTwoDecks ? "text-green-400" : "text-white/40"}`}>
+                {gameState.config.forceTwoDecks ? "✓ Ativa" : "✗ Inativa"}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-sm">Modo Insanidade 🃏</span>
+              <span className="text-[10px] text-white/40">Escala até 7 baralhos (cores distintas)</span>
+            </div>
+            {isHost ? (
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-yellow-400 ml-3 shrink-0"
+                checked={gameState.config.insanityMode ?? false}
+                onChange={(e) => updateConfig({ insanityMode: e.target.checked, forceTwoDecks: false })}
+              />
+            ) : (
+              <span className={`text-sm font-bold ml-3 ${gameState.config.insanityMode ? "text-green-400" : "text-white/40"}`}>
+                {gameState.config.insanityMode ? "✓ Ativa" : "✗ Inativa"}
+              </span>
+            )}
+          </div>
+
           <div className="flex items-center justify-between">
             <span className="text-sm">Carta na Testa</span>
             {isHost ? (

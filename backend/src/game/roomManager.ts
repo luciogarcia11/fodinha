@@ -1,5 +1,5 @@
 import { GameState, GameConfig, Player, ChatMessage } from '../types';
-import { buildDeck, buildMultiDeck, shuffleDeck, dealCards, CARDS_PER_DECK, MAX_DECKS, MAX_TOTAL_CARDS } from './deck';
+import { buildDeck, buildMultiDeck, shuffleDeck, dealCards, CARDS_PER_DECK, MAX_DECKS, MAX_TOTAL_CARDS, INSANITY_MAX_DECKS, INSANITY_MAX_TOTAL_CARDS } from './deck';
 import { getCardsForRound } from './logic';
 import crypto from 'crypto';
 import {
@@ -53,6 +53,8 @@ export function createRoom(hostId: string, hostName: string): GameState {
     isPublic: true,
     deckCount: 1,  // Calculado dinamicamente a cada rodada
     maxPlayers: 14,
+    forceTwoDecks: false,
+    insanityMode: false,
   };
 
   const host: Player = {
@@ -258,7 +260,12 @@ export function rejoinRoom(roomId: string, sessionId: string, newSocketId: strin
 export function recalcMaxRounds(state: GameState): void {
   const activePlayers = state.players.filter(p => !p.isEliminated && !p.isSpectator);
   if (activePlayers.length < 1) return;
-  state.config.maxRounds = Math.floor(MAX_TOTAL_CARDS / activePlayers.length);
+  const maxCards = state.config.insanityMode
+    ? INSANITY_MAX_TOTAL_CARDS
+    : state.config.forceTwoDecks
+      ? 2 * CARDS_PER_DECK
+      : MAX_TOTAL_CARDS;
+  state.config.maxRounds = Math.floor(maxCards / activePlayers.length);
 }
 
 export function startGame(roomId: string): GameState | null {
@@ -292,11 +299,17 @@ export function dealRound(state: GameState): GameState {
   state.cardsThisRound = cardsThisRound;
   state.ascending = ascending;
 
-  // Escala dinâmica de baralhos: 1→2→3 conforme necessidade
+  // Escala dinâmica de baralhos conforme modo de jogo
   const cardsNeeded = activePlayers.length * cardsThisRound;
   const decksNeeded = Math.ceil(cardsNeeded / CARDS_PER_DECK);
   const minDecks = state.config.fdpRule && state.config.fdpStartDoubleDeck ? 2 : 1;
-  const actualDecks = Math.min(MAX_DECKS, Math.max(minDecks, decksNeeded));
+  let actualDecks: number;
+  if (state.config.forceTwoDecks) {
+    actualDecks = 2;
+  } else {
+    const maxDecks = state.config.insanityMode ? INSANITY_MAX_DECKS : MAX_DECKS;
+    actualDecks = Math.min(maxDecks, Math.max(minDecks, decksNeeded));
+  }
 
   state.config.deckCount = actualDecks;
   const deck = shuffleDeck(buildMultiDeck(actualDecks));
