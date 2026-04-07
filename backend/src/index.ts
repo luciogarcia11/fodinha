@@ -26,6 +26,7 @@ import {
   leaveSpectatorQueue,
   promoteSpectatorFromQueue,
   getSpectatorQueuePositions,
+  recalcMaxRounds,
 } from "./game/roomManager";
 import {
   resolveVaza,
@@ -33,7 +34,6 @@ import {
   getForbiddenBet,
   applyRoundResult,
   checkGameOver,
-  getCardsForRound,
 } from "./game/logic";
 import {
   initializeDatabase,
@@ -236,6 +236,7 @@ function handleAfkKick(roomId: string) {
 
   io.to(targetId).emit("game:kicked", { message: "Você foi removido por inatividade (AFK)." });
   io.to(roomId).emit("game:playerQuit", { playerName: target.name });
+  recalcMaxRounds(state);
 
   if (checkAndEmitGameOver(roomId, state)) {
     clearAfkTimer(roomId);
@@ -530,22 +531,11 @@ io.on("connection", (socket) => {
 
                   state.round++;
                   const activePlayers = state.players.filter(
-                    (p) => !p.isEliminated,
+                    (p) => !p.isEliminated && !p.isSpectator,
                   );
-
-                  // Recalculate maxRounds with potentially new player count
-                  const totalCards = state.config.deckCount === 2 ? 80 : 40;
-                  state.config.maxRounds = Math.floor(totalCards / activePlayers.length);
 
                   state.dealerIndex =
                     (state.dealerIndex + 1) % activePlayers.length;
-
-                  const { cardsThisRound, ascending } = getCardsForRound(
-                    state.round,
-                    state.config.maxRounds,
-                  );
-                  state.cardsThisRound = cardsThisRound;
-                  state.ascending = ascending;
 
                   dealRound(state);
                   io.to(roomId).emit("game:stateUpdate", state);
@@ -596,6 +586,7 @@ io.on("connection", (socket) => {
     }
 
     player.isSpectator = true;
+    recalcMaxRounds(state);
     io.to(roomId).emit("game:stateUpdate", state);
   });
 
@@ -655,6 +646,7 @@ io.on("connection", (socket) => {
 
     io.to(roomId).emit("game:stateUpdate", state);
     io.to(roomId).emit("game:playerQuit", { playerName: quitterName });
+    recalcMaxRounds(state);
     resetAfkTimer(roomId);
   });
 
@@ -748,6 +740,7 @@ io.on("connection", (socket) => {
       const kickTimer = voteKickTimers.get(roomId);
       if (kickTimer) { clearTimeout(kickTimer); voteKickTimers.delete(roomId); }
 
+      recalcMaxRounds(state);
       checkAndEmitGameOver(roomId, state);
 
       io.to(roomId).emit("game:stateUpdate", state);
@@ -780,6 +773,7 @@ io.on("connection", (socket) => {
     io.to(targetId).emit("game:kicked", { message: "Você foi banido pelo host." });
     io.to(roomId).emit("game:playerQuit", { playerName: target.name });
 
+    recalcMaxRounds(state);
     checkAndEmitGameOver(roomId, state);
 
     io.to(roomId).emit("game:stateUpdate", state);
@@ -808,6 +802,7 @@ io.on("connection", (socket) => {
     io.to(targetId).emit("game:kicked", { message: "Você foi removido pelo host." });
     io.to(roomId).emit("game:playerQuit", { playerName: target.name });
 
+    recalcMaxRounds(state);
     checkAndEmitGameOver(roomId, state);
 
     io.to(roomId).emit("game:stateUpdate", state);
@@ -997,6 +992,7 @@ io.on("connection", (socket) => {
               }
             }
 
+            recalcMaxRounds(freshState);
             checkAndEmitGameOver(roomId, freshState);
 
             io.to(roomId).emit("game:stateUpdate", freshState);
