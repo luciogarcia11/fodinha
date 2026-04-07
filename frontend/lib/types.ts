@@ -6,7 +6,7 @@ export interface Card {
   suit: Suit;
   isManilha: boolean;
   strength: number;
-  deckColor?: 'blue' | 'red';
+  deckColor?: 'blue' | 'red' | 'green';
 }
 
 export interface PlayedCard {
@@ -35,7 +35,7 @@ export interface GameConfig {
   suitTiebreakerRule: boolean;
   maxRounds: number;
   isPublic: boolean;
-  deckCount: 1 | 2;  // Número de baralhos (1 ou 2)
+  deckCount: number;  // Número de baralhos em uso (1, 2 ou 3)
   maxPlayers: number;
 }
 
