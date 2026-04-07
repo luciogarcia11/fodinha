@@ -39,12 +39,11 @@ export function saveRoom(state: GameState): void {
     Math.floor(Date.now() / 1000)
   );
 
-  // Save room config
   const configStmt = db.prepare(`
     INSERT OR REPLACE INTO room_configs (
       room_id, lives_per_player, fdp_rule, card_on_forehead_rule,
-      suit_tiebreaker_rule, max_rounds, deck_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      suit_tiebreaker_rule, max_rounds, deck_count, max_players
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   configStmt.run(
@@ -54,7 +53,8 @@ export function saveRoom(state: GameState): void {
     state.config.cardOnForeheadRule ? 1 : 0,
     state.config.suitTiebreakerRule ? 1 : 0,
     state.config.maxRounds,
-    state.config.deckCount
+    state.config.deckCount,
+    state.config.maxPlayers
   );
 
   // Save players
@@ -63,8 +63,8 @@ export function saveRoom(state: GameState): void {
 
   const insertPlayerStmt = db.prepare(`
     INSERT INTO players (
-      id, room_id, name, lives, hand, connected, is_eliminated, session_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      id, room_id, name, lives, hand, connected, is_eliminated, session_id, is_spectator, was_kicked
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertPlayer = db.transaction((player: Player) => {
@@ -76,7 +76,9 @@ export function saveRoom(state: GameState): void {
       JSON.stringify(player.hand),
       player.connected ? 1 : 0,
       player.isEliminated ? 1 : 0,
-      player.sessionId
+      player.sessionId,
+      player.isSpectator ? 1 : 0,
+      player.wasKicked ? 1 : 0
     );
   });
 
@@ -102,6 +104,7 @@ export function loadRoom(roomId: string): GameState | null {
     maxRounds: configRow?.max_rounds || 0,
     isPublic: !!room.is_public,
     deckCount: (configRow?.deck_count || 1) as 1 | 2,
+    maxPlayers: configRow?.max_players || 10,
   };
 
   const playersStmt = db.prepare('SELECT * FROM players WHERE room_id = ?');
@@ -116,6 +119,7 @@ export function loadRoom(roomId: string): GameState | null {
     isEliminated: !!row.is_eliminated,
     isSpectator: !!row.is_spectator,
     sessionId: row.session_id,
+    wasKicked: !!row.was_kicked,
   }));
 
   const chatStmt = db.prepare('SELECT * FROM room_chat WHERE room_id = ? ORDER BY timestamp DESC LIMIT 30');
@@ -153,6 +157,7 @@ export function loadRoom(roomId: string): GameState | null {
     activeVoteKick: null,
     bannedIds: getBannedPlayers(roomId),
     chatMessages,
+    spectatorQueue: [],
   };
 }
 
@@ -185,7 +190,7 @@ export function listPublicRooms(): Array<{
       roomId: row.id,
       hostName: row.host_name,
       playerCount: getPlayerCount(row.id),
-      maxPlayers: 10,
+      maxPlayers: row.max_players || 10,
       config: {
         livesPerPlayer: row.lives_per_player || 3,
         fdpRule: !!row.fdp_rule,
@@ -195,6 +200,7 @@ export function listPublicRooms(): Array<{
         maxRounds: row.max_rounds || 0,
         isPublic: true,
         deckCount: (row.deck_count || 1) as 1 | 2,
+        maxPlayers: row.max_players || 10,
       },
     }))
     .filter(room => room.playerCount > 0); // Only show rooms with players
@@ -231,7 +237,7 @@ export function listWatchableRoomsDB(): Array<{
       hostName: row.host_name,
       phase: row.phase,
       playerCount: getPlayerCount(row.id),
-      maxPlayers: 10,
+      maxPlayers: row.max_players || 10,
       config: {
         livesPerPlayer: row.lives_per_player || 3,
         fdpRule: !!row.fdp_rule,
@@ -241,6 +247,7 @@ export function listWatchableRoomsDB(): Array<{
         maxRounds: row.max_rounds || 0,
         isPublic: true,
         deckCount: (row.deck_count || 1) as 1 | 2,
+        maxPlayers: row.max_players || 10,
       },
     }))
     .filter(room => room.playerCount > 0);

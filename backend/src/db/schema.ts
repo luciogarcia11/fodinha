@@ -68,6 +68,27 @@ export function initializeDatabase() {
     // Column already exists, ignore error
   }
 
+  // Migration: Add max_players column if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE room_configs ADD COLUMN max_players INTEGER NOT NULL DEFAULT 10`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+
+  // Migration: Add is_spectator column to players if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE players ADD COLUMN is_spectator INTEGER NOT NULL DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+
+  // Migration: Add was_kicked column to players if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE players ADD COLUMN was_kicked INTEGER NOT NULL DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+
   // Banned players table (persistent across sessions)
   db.exec(`
     CREATE TABLE IF NOT EXISTS banned_players (
