@@ -22,6 +22,10 @@ import {
   banPlayer as banPlayerRoom,
   setGameOverRoomsRef,
   updateRoomInCache,
+  joinSpectatorQueue,
+  leaveSpectatorQueue,
+  promoteSpectatorFromQueue,
+  getSpectatorQueuePositions,
 } from "./game/roomManager";
 import {
   resolveVaza,
@@ -207,6 +211,7 @@ function handleAfkKick(roomId: string) {
     const nextTurn = getNextPlayer(state, targetId);
     target.isEliminated = true;
     target.lives = 0;
+    target.wasKicked = true;
   
   if (state.phase === "betting") {
     const idx = state.bettingOrder.indexOf(targetId);
@@ -265,6 +270,8 @@ io.on("connection", (socket) => {
         state,
         sessionId: player?.sessionId,
       });
+      // Broadcast updated room list
+      io.emit("room:list", listPublicRooms());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao criar sala';
       socket.emit("room:error", { message });
@@ -278,15 +285,44 @@ io.on("connection", (socket) => {
       try {
         const validatedName = validatePlayerName(name);
         const validatedRoomId = validateRoomId(roomId);
-        const state = joinRoom(validatedRoomId, socket.id, validatedName);
-        if (!state) {
-          socket.emit("room:error", { message: "Sala não encontrada, cheia ou você está banido." });
+        const { state, result } = joinRoom(validatedRoomId, socket.id, validatedName);
+
+        if (result === 'ok') {
+          socket.join(validatedRoomId);
+          const player = state.players.find(p => p.id === socket.id);
+          socket.emit("room:sessionInfo", { sessionId: player?.sessionId });
+          io.to(validatedRoomId).emit("game:stateUpdate", state);
+          // Broadcast updated room list to all sockets
+          io.emit("room:list", listPublicRooms());
           return;
         }
-        socket.join(validatedRoomId);
-        const player = state.players.find(p => p.id === socket.id);
-        socket.emit("room:sessionInfo", { sessionId: player?.sessionId });
-        io.to(validatedRoomId).emit("game:stateUpdate", state);
+
+        if (result === 'banned') {
+          socket.emit("room:error", { message: "Você está banido desta sala." });
+          return;
+        }
+
+        if (result === 'invalid_name') {
+          socket.emit("room:error", { message: "Nome inválido." });
+          return;
+        }
+
+        // Room is full or game in progress — try joining as spectator
+        if (result === 'full' || result === 'in_progress') {
+          const spectatorState = joinAsSpectator(validatedRoomId, socket.id, validatedName);
+          if (spectatorState) {
+            socket.join(validatedRoomId);
+            const player = spectatorState.players.find(p => p.id === socket.id);
+            socket.emit("room:sessionInfo", { sessionId: player?.sessionId });
+            socket.emit("room:joinedAsSpectator", { message: "Sala cheia — você entrou como espectador." });
+            io.to(validatedRoomId).emit("game:stateUpdate", spectatorState);
+            return;
+          }
+          socket.emit("room:error", { message: "Sala cheia e sem vagas para espectadores." });
+          return;
+        }
+
+        socket.emit("room:error", { message: "Sala não encontrada." });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Erro ao entrar na sala';
         socket.emit("room:error", { message });
@@ -478,10 +514,29 @@ io.on("connection", (socket) => {
                 console.log(`[Round End] Game over na sala ${roomId} - vencedor: ${gameWinner}`);
               } else {
                 setTimeout(() => {
+                  // Promote spectators from queue before new round
+                  const promoted: string[] = [];
+                  while (state.spectatorQueue.length > 0) {
+                    const activeCount = state.players.filter(p => !p.isEliminated && !p.isSpectator).length;
+                    if (activeCount >= state.config.maxPlayers) break;
+                    const promotedPlayer = promoteSpectatorFromQueue(roomId);
+                    if (!promotedPlayer) break;
+                    promoted.push(promotedPlayer.name);
+                  }
+                  if (promoted.length > 0) {
+                    io.to(roomId).emit("spectator:promoted", { names: promoted });
+                    io.to(roomId).emit("spectator:queueUpdate", getSpectatorQueuePositions(roomId));
+                  }
+
                   state.round++;
                   const activePlayers = state.players.filter(
                     (p) => !p.isEliminated,
                   );
+
+                  // Recalculate maxRounds with potentially new player count
+                  const totalCards = state.config.deckCount === 2 ? 80 : 40;
+                  state.config.maxRounds = Math.floor(totalCards / activePlayers.length);
+
                   state.dealerIndex =
                     (state.dealerIndex + 1) % activePlayers.length;
 
@@ -524,7 +579,22 @@ io.on("connection", (socket) => {
     const state = getRoom(roomId);
     if (!state) return;
     const player = state.players.find(p => p.id === socket.id);
-    if (!player || !player.isEliminated) return;
+    if (!player) return;
+
+    // Se ainda está ativo no jogo, elimina primeiro
+    if (!player.isEliminated) {
+      const nextTurn = getNextPlayer(state, socket.id);
+      player.isEliminated = true;
+      player.lives = 0;
+      state.bettingOrder = state.bettingOrder.filter(id => id !== socket.id);
+
+      if (state.currentTurn === socket.id) {
+        state.currentTurn = nextTurn;
+      }
+
+      checkAndEmitGameOver(roomId, state);
+    }
+
     player.isSpectator = true;
     io.to(roomId).emit("game:stateUpdate", state);
   });
@@ -658,6 +728,7 @@ io.on("connection", (socket) => {
         const nextTurnVote = getNextPlayer(state, vote.targetId);
         targetPlayer.isEliminated = true;
         targetPlayer.lives = 0;
+        targetPlayer.wasKicked = true;
         state.bettingOrder = state.bettingOrder.filter(id => id !== vote.targetId);
 
         // Se era a vez dele, avança
@@ -727,6 +798,7 @@ io.on("connection", (socket) => {
     const nextTurnKick = getNextPlayer(state, targetId);
     target.isEliminated = true;
     target.lives = 0;
+    target.wasKicked = true;
     state.bettingOrder = state.bettingOrder.filter(id => id !== targetId);
 
     if (state.currentTurn === targetId) {
@@ -812,6 +884,20 @@ io.on("connection", (socket) => {
     socket.emit("room:listWatchable", listWatchableRooms());
   });
 
+  // ===== SPECTATOR:JOINQUEUE =====
+  socket.on("spectator:joinQueue", ({ roomId }: { roomId: string }) => {
+    const position = joinSpectatorQueue(roomId, socket.id);
+    if (position > 0) {
+      io.to(roomId).emit("spectator:queueUpdate", getSpectatorQueuePositions(roomId));
+    }
+  });
+
+  // ===== SPECTATOR:LEAVEQUEUE =====
+  socket.on("spectator:leaveQueue", ({ roomId }: { roomId: string }) => {
+    leaveSpectatorQueue(roomId, socket.id);
+    io.to(roomId).emit("spectator:queueUpdate", getSpectatorQueuePositions(roomId));
+  });
+
   // ===== ROOM:JOIN:SPECTATOR =====
   socket.on("room:joinAsSpectator", ({ roomId, name }: { roomId: string; name: string }) => {
     try {
@@ -841,12 +927,17 @@ io.on("connection", (socket) => {
         const player = state.players.find((p) => p.id === socket.id);
         if (!player) continue;
 
+        // Remove from spectator queue if present
+        leaveSpectatorQueue(roomId, socket.id);
+
         console.log(`[Disconnect] Jogador ${player.name} desconectado da sala ${roomId} (fase: ${state.phase})`);
 
         if (state.phase === "lobby") {
           // No lobby: remove imediatamente
           disconnectPlayer(roomId, socket.id);
           io.to(roomId).emit("game:stateUpdate", state);
+          // Broadcast updated room list
+          io.emit("room:list", listPublicRooms());
           break;
         }
 

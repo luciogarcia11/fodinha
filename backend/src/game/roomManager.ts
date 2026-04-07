@@ -51,6 +51,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
     maxRounds: 0,
     isPublic: true,
     deckCount: 1,  // Padrão: 1 baralho
+    maxPlayers: 10,
   };
 
   const host: Player = {
@@ -62,6 +63,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
     isEliminated: false,
     isSpectator: false,
     sessionId: generateSessionId(),
+    wasKicked: false,
   };
 
   const state: GameState = {
@@ -87,6 +89,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
     activeVoteKick: null,
     bannedIds: [],
     chatMessages: [],
+    spectatorQueue: [],
   };
 
   rooms.set(roomId, state);
@@ -109,20 +112,29 @@ export function updateRoomInCache(roomId: string, state: GameState): void {
   rooms.set(roomId, state);
 }
 
-export function joinRoom(roomId: string, playerId: string, playerName: string): GameState | null {
+export function joinRoom(roomId: string, playerId: string, playerName: string): { state: GameState; result: 'ok' | 'not_found' | 'full' | 'in_progress' | 'invalid_name' | 'banned' } {
   const state = rooms.get(roomId);
-  if (!state || state.phase !== 'lobby') return null;
-  if (state.players.length >= 10) return null;
+  if (!state) return { state: null as any, result: 'not_found' };
+  if (state.phase !== 'lobby') {
+    if (state.phase === 'game_over') return { state: null as any, result: 'not_found' };
+    return { state, result: 'in_progress' };
+  }
+
+  // Check if player is banned
+  if (isPlayerBanned(roomId, playerId)) return { state: null as any, result: 'banned' };
+
+  const nonSpectators = state.players.filter(p => !p.isSpectator).length;
+  if (nonSpectators >= state.config.maxPlayers) return { state, result: 'full' };
 
   // Validate player name
   if (!playerName || playerName.trim().length === 0 || playerName.trim().length > 16) {
-    return null;
+    return { state: null as any, result: 'invalid_name' };
   }
 
   const existing = state.players.find(p => p.id === playerId);
   if (existing) {
     existing.connected = true;
-    return state;
+    return { state, result: 'ok' };
   }
 
   const newPlayer: Player = {
@@ -134,23 +146,24 @@ export function joinRoom(roomId: string, playerId: string, playerName: string): 
     isEliminated: false,
     isSpectator: false,
     sessionId: generateSessionId(),
+    wasKicked: false,
   };
 
   state.players.push(newPlayer);
   saveRoom(state); // Persist to SQLite
 
-  return state;
+  return { state, result: 'ok' };
 }
 
 /**
- * Entra como espectador externo em uma partida em andamento.
+ * Entra como espectador externo em uma partida.
  * Máximo de 10 espectadores por sala. Não adiciona ao bettingOrder.
+ * Permite lobby (para salas cheias) e partidas ativas.
  */
 export function joinAsSpectator(roomId: string, socketId: string, playerName: string): GameState | null {
   const state = rooms.get(roomId);
   if (!state) return null;
-  // Só permite entrar como espectador em partidas ativas (não no lobby)
-  if (state.phase === 'lobby' || state.phase === 'game_over') return null;
+  if (state.phase === 'game_over') return null;
 
   if (!playerName || playerName.trim().length === 0 || playerName.trim().length > 16) return null;
 
@@ -173,6 +186,7 @@ export function joinAsSpectator(roomId: string, socketId: string, playerName: st
     isEliminated: true,
     isSpectator: true,
     sessionId: generateSessionId(),
+    wasKicked: false,
   };
 
   state.players.push(spectator);
@@ -209,6 +223,13 @@ export function rejoinRoom(roomId: string, sessionId: string, newSocketId: strin
   if (timerId) {
     clearTimeout(timerId);
     disconnectTimers.delete(sessionId);
+  }
+
+  // Kicked players can only rejoin as spectators
+  if (player.wasKicked && !player.isSpectator) {
+    player.isSpectator = true;
+    player.isEliminated = true;
+    player.lives = 0;
   }
 
   player.id = newSocketId;
@@ -592,4 +613,78 @@ export function banPlayer(roomId: string, sessionId: string, bannedBy: string, r
       state.bannedIds.push(sessionId);
     }
   }
+}
+
+/**
+ * Adiciona espectador à fila de entrada.
+ */
+export function joinSpectatorQueue(roomId: string, playerId: string): number {
+  const state = rooms.get(roomId);
+  if (!state) return -1;
+
+  const player = state.players.find(p => p.id === playerId);
+  if (!player || !player.isSpectator) return -1;
+
+  if (state.spectatorQueue.includes(playerId)) {
+    return state.spectatorQueue.indexOf(playerId) + 1;
+  }
+
+  state.spectatorQueue.push(playerId);
+  return state.spectatorQueue.length;
+}
+
+/**
+ * Remove espectador da fila de entrada.
+ */
+export function leaveSpectatorQueue(roomId: string, playerId: string): void {
+  const state = rooms.get(roomId);
+  if (!state) return;
+
+  state.spectatorQueue = state.spectatorQueue.filter(id => id !== playerId);
+}
+
+/**
+ * Promove o primeiro espectador da fila para jogador ativo.
+ * Vidas = max(1, floor(média de vidas dos jogadores ativos) - 1)
+ */
+export function promoteSpectatorFromQueue(roomId: string): Player | null {
+  const state = rooms.get(roomId);
+  if (!state || state.spectatorQueue.length === 0) return null;
+
+  const activePlayers = state.players.filter(p => !p.isEliminated && !p.isSpectator);
+  if (activePlayers.length >= state.config.maxPlayers) return null;
+
+  // Find the first valid spectator in queue
+  while (state.spectatorQueue.length > 0) {
+    const nextId = state.spectatorQueue.shift()!;
+    const player = state.players.find(p => p.id === nextId);
+    if (!player || !player.connected || !player.isSpectator) continue;
+
+    // Calculate lives: max(1, floor(avg active lives) - 1)
+    const avgLives = activePlayers.length > 0
+      ? Math.floor(activePlayers.reduce((sum, p) => sum + p.lives, 0) / activePlayers.length)
+      : state.config.livesPerPlayer;
+    const lives = Math.max(1, avgLives - 1);
+
+    player.isSpectator = false;
+    player.isEliminated = false;
+    player.lives = lives;
+    player.wasKicked = false;
+    player.hand = [];
+
+    saveRoom(state);
+    return player;
+  }
+
+  return null;
+}
+
+/**
+ * Retorna as posições na fila para broadcast.
+ */
+export function getSpectatorQueuePositions(roomId: string): Array<{ playerId: string; position: number }> {
+  const state = rooms.get(roomId);
+  if (!state) return [];
+
+  return state.spectatorQueue.map((id, i) => ({ playerId: id, position: i + 1 }));
 }
