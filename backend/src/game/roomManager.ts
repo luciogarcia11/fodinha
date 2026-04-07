@@ -1,5 +1,5 @@
 import { GameState, GameConfig, Player, ChatMessage } from '../types';
-import { buildDeck, buildMultiDeck, shuffleDeck, dealCards } from './deck';
+import { buildDeck, buildMultiDeck, shuffleDeck, dealCards, CARDS_PER_DECK, MAX_DECKS, MAX_TOTAL_CARDS } from './deck';
 import { getCardsForRound } from './logic';
 import crypto from 'crypto';
 import {
@@ -50,8 +50,8 @@ export function createRoom(hostId: string, hostName: string): GameState {
     suitTiebreakerRule: false,
     maxRounds: 0,
     isPublic: true,
-    deckCount: 1,  // Padrão: 1 baralho
-    maxPlayers: 10,
+    deckCount: 1,  // Calculado dinamicamente a cada rodada
+    maxPlayers: 14,
   };
 
   const host: Player = {
@@ -239,52 +239,55 @@ export function rejoinRoom(roomId: string, sessionId: string, newSocketId: strin
   return state;
 }
 
+/**
+ * Recalcula maxRounds baseado no número de jogadores ativos e cartas disponíveis (até 3 baralhos).
+ * Deve ser chamado sempre que o número de jogadores ativos mudar.
+ */
+export function recalcMaxRounds(state: GameState): void {
+  const activePlayers = state.players.filter(p => !p.isEliminated && !p.isSpectator);
+  if (activePlayers.length < 1) return;
+  state.config.maxRounds = Math.floor(MAX_TOTAL_CARDS / activePlayers.length);
+}
+
 export function startGame(roomId: string): GameState | null {
   const state = rooms.get(roomId);
   if (!state || state.players.length < 2) return null;
 
-  const playerCount = Math.max(1, state.players.length);
-  // Calcula maxRounds baseado no número de baralhos
-  const totalCards = state.config.deckCount === 2 ? 80 : 40;
-  state.config.maxRounds = Math.floor(totalCards / playerCount);
-
   state.players.forEach(p => {
-    p.lives = state.config.livesPerPlayer;
-    p.isEliminated = false;
+    if (!p.isSpectator) {
+      p.lives = state.config.livesPerPlayer;
+      p.isEliminated = false;
+    }
   });
 
   state.dealerIndex = 0;
   state.round = 1;
-  state.bannedIds = getBannedPlayers(roomId); // Load bans from DB
+  state.bannedIds = getBannedPlayers(roomId);
 
-  saveRoom(state); // Persist to SQLite
+  recalcMaxRounds(state);
+  saveRoom(state);
   return dealRound(state);
 }
 
 export function dealRound(state: GameState): GameState {
-  const { cardsThisRound } = getCardsForRound(state.round, state.config.maxRounds);
+  const activePlayers = state.players.filter(p => !p.isEliminated && !p.isSpectator);
+  if (activePlayers.length < 1) return state;
+
+  // Recalcula maxRounds dinamicamente a cada rodada
+  recalcMaxRounds(state);
+
+  const { cardsThisRound, ascending } = getCardsForRound(state.round, state.config.maxRounds);
   state.cardsThisRound = cardsThisRound;
+  state.ascending = ascending;
 
-  const activePlayers = state.players.filter(p => !p.isEliminated);
+  // Escala dinâmica de baralhos: 1→2→3 conforme necessidade
+  const cardsNeeded = activePlayers.length * cardsThisRound;
+  const decksNeeded = Math.ceil(cardsNeeded / CARDS_PER_DECK);
+  const minDecks = state.config.fdpRule && state.config.fdpStartDoubleDeck ? 2 : 1;
+  const actualDecks = Math.min(MAX_DECKS, Math.max(minDecks, decksNeeded));
 
-  // Seleciona o deck:
-  // - Sem FDP: usa deckCount da configuração (1 ou 2 baralhos fixo)
-  // - Com FDP + fdpStartDoubleDeck: sempre usa baralho duplo
-  // - Com FDP sem fdpStartDoubleDeck: usa baralho simples até o limite de 40 cartas;
-  //   escala automaticamente para duplo quando necessário
-  let usedDouble = false;
-  let deck: ReturnType<typeof buildDeck>;
-  if (state.config.fdpRule) {
-    const needsDouble = state.config.fdpStartDoubleDeck
-      || activePlayers.length * cardsThisRound > 40;
-    usedDouble = needsDouble;
-    deck = needsDouble ? shuffleDeck(buildMultiDeck()) : shuffleDeck(buildDeck('blue'));
-  } else {
-    usedDouble = state.config.deckCount === 2;
-    deck = usedDouble ? shuffleDeck(buildMultiDeck()) : shuffleDeck(buildDeck('blue'));
-  }
-  // Atualiza deckCount no estado para refletir o deck efectivamente usado
-  state.config.deckCount = usedDouble ? 2 : 1;
+  state.config.deckCount = actualDecks;
+  const deck = shuffleDeck(buildMultiDeck(actualDecks));
   const hands = dealCards(deck, activePlayers.length, cardsThisRound);
 
   activePlayers.forEach((p, i) => {
@@ -318,8 +321,12 @@ export function dealRound(state: GameState): GameState {
 export function updateConfig(roomId: string, config: Partial<GameConfig>): GameState | null {
   const state = rooms.get(roomId);
   if (!state || state.phase !== 'lobby') return null;
+  // Valida maxPlayers (2-20)
+  if (config.maxPlayers !== undefined) {
+    config.maxPlayers = Math.max(2, Math.min(20, Math.floor(config.maxPlayers)));
+  }
   state.config = { ...state.config, ...config };
-  saveRoom(state); // Persist to SQLite
+  saveRoom(state);
   return state;
 }
 

@@ -104,7 +104,7 @@ export function loadRoom(roomId: string): GameState | null {
     maxRounds: configRow?.max_rounds || 0,
     isPublic: !!room.is_public,
     deckCount: (configRow?.deck_count || 1) as 1 | 2,
-    maxPlayers: configRow?.max_players || 10,
+    maxPlayers: configRow?.max_players || 14,
   };
 
   const playersStmt = db.prepare('SELECT * FROM players WHERE room_id = ?');
@@ -190,7 +190,7 @@ export function listPublicRooms(): Array<{
       roomId: row.id,
       hostName: row.host_name,
       playerCount: getPlayerCount(row.id),
-      maxPlayers: row.max_players || 10,
+      maxPlayers: row.max_players || 14,
       config: {
         livesPerPlayer: row.lives_per_player || 3,
         fdpRule: !!row.fdp_rule,
@@ -200,7 +200,7 @@ export function listPublicRooms(): Array<{
         maxRounds: row.max_rounds || 0,
         isPublic: true,
         deckCount: (row.deck_count || 1) as 1 | 2,
-        maxPlayers: row.max_players || 10,
+        maxPlayers: row.max_players || 14,
       },
     }))
     .filter(room => room.playerCount > 0); // Only show rooms with players
@@ -237,7 +237,7 @@ export function listWatchableRoomsDB(): Array<{
       hostName: row.host_name,
       phase: row.phase,
       playerCount: getPlayerCount(row.id),
-      maxPlayers: row.max_players || 10,
+      maxPlayers: row.max_players || 14,
       config: {
         livesPerPlayer: row.lives_per_player || 3,
         fdpRule: !!row.fdp_rule,
@@ -247,7 +247,7 @@ export function listWatchableRoomsDB(): Array<{
         maxRounds: row.max_rounds || 0,
         isPublic: true,
         deckCount: (row.deck_count || 1) as 1 | 2,
-        maxPlayers: row.max_players || 10,
+        maxPlayers: row.max_players || 14,
       },
     }))
     .filter(room => room.playerCount > 0);
