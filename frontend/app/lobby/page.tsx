@@ -48,7 +48,7 @@ function LobbyContent() {
 
       <div className="bg-white/10 rounded-2xl p-4 w-full max-w-sm">
         <h2 className="font-bold text-lg mb-3">
-          Jogadores ({gameState.players.length}/{gameState.config.maxPlayers ?? 10})
+          Jogadores ({gameState.players.length}/{gameState.config.maxPlayers ?? 14})
         </h2>
         <div className="flex flex-col gap-2">
           {gameState.players.map((p) => (
@@ -181,12 +181,12 @@ function LobbyContent() {
             {isHost ? (
               <select
                 className="bg-white/20 text-white rounded px-2 py-1 text-sm"
-                value={gameState.config.maxPlayers ?? 10}
+                value={gameState.config.maxPlayers ?? 14}
                 onChange={(e) =>
                   updateConfig({ maxPlayers: Number(e.target.value) })
                 }
               >
-                {Array.from({ length: 13 }, (_, i) => i + 2).map((n) => (
+                {Array.from({ length: 19 }, (_, i) => i + 2).map((n) => (
                   <option key={n} value={n} className="text-gray-900">
                     {n}
                   </option>
@@ -194,7 +194,7 @@ function LobbyContent() {
               </select>
             ) : (
               <span className="text-yellow-400 font-bold text-sm">
-                {gameState.config.maxPlayers ?? 10}
+                {gameState.config.maxPlayers ?? 14}
               </span>
             )}
           </div>

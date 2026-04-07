@@ -30,9 +30,9 @@ export default function CardComponent({
     : 'w-16 h-24 rounded-lg text-sm';
 
   if (hidden || !card) {
-    const backIsRed = card?.deckColor === 'red';
-    const backBg = backIsRed ? 'bg-red-800 border-red-600' : 'bg-blue-800 border-blue-600';
-    const backText = backIsRed ? 'text-red-400' : 'text-blue-400';
+    const backColor = card?.deckColor === 'red' ? 'red' : card?.deckColor === 'green' ? 'green' : 'blue';
+    const backBg = backColor === 'red' ? 'bg-red-800 border-red-600' : backColor === 'green' ? 'bg-green-800 border-green-600' : 'bg-blue-800 border-blue-600';
+    const backText = backColor === 'red' ? 'text-red-400' : backColor === 'green' ? 'text-green-400' : 'text-blue-400';
     return (
       <motion.div
         className={`${base} ${backBg} border-2 flex items-center justify-center select-none ${onClick && !disabled ? 'cursor-pointer' : 'cursor-default'}`}
@@ -50,9 +50,10 @@ export default function CardComponent({
   
   const isRedDeck = card.deckColor === 'red';
   const isBlueDeck = card.deckColor === 'blue';
+  const isGreenDeck = card.deckColor === 'green';
 
-  const defaultBg = isRedDeck ? 'bg-red-50' : (isBlueDeck ? 'bg-blue-50' : 'bg-white');
-  const defaultBorder = isRedDeck ? 'border-red-400' : (isBlueDeck ? 'border-blue-400' : 'border-gray-300');
+  const defaultBg = isRedDeck ? 'bg-red-50' : isGreenDeck ? 'bg-green-50' : (isBlueDeck ? 'bg-blue-50' : 'bg-white');
+  const defaultBorder = isRedDeck ? 'border-red-400' : isGreenDeck ? 'border-green-400' : (isBlueDeck ? 'border-blue-400' : 'border-gray-300');
 
   return (
     <motion.div
