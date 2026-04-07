@@ -62,12 +62,14 @@ export function saveRoom(state: GameState): void {
   deletePlayersStmt.run(state.roomId);
 
   const insertPlayerStmt = db.prepare(`
-    INSERT INTO players (
+    INSERT OR REPLACE INTO players (
       id, room_id, name, lives, hand, connected, is_eliminated, session_id, is_spectator, was_kicked
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertPlayer = db.transaction((player: Player) => {
+    // Remove stale entries for this socket id in other rooms before inserting
+    db.prepare('DELETE FROM players WHERE id = ? AND room_id != ?').run(player.id, state.roomId);
     insertPlayerStmt.run(
       player.id,
       state.roomId,
