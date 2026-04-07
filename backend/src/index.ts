@@ -125,6 +125,29 @@ const gameOverRooms = new Set<string>();
 // Timers de game-over: sala fica aberta 5 min para placar, depois fecha.
 const gameOverTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// Timers de lobby: sala fecha automaticamente se não iniciar em 5 min.
+const lobbyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function cancelLobbyTimer(roomId: string): void {
+  const t = lobbyTimers.get(roomId);
+  if (t) { clearTimeout(t); lobbyTimers.delete(roomId); }
+}
+
+function startLobbyTimer(roomId: string): void {
+  cancelLobbyTimer(roomId);
+  const timer = setTimeout(() => {
+    const state = getRoom(roomId);
+    lobbyTimers.delete(roomId);
+    if (!state || state.phase !== 'lobby') return;
+    deleteRoom(roomId);
+    io.to(roomId).emit('room:lobbyExpired', { message: 'O lobby expirou por inatividade.' });
+    io.to(roomId).emit('room:closed');
+    io.emit('room:list', listPublicRooms());
+    console.log(`[Lobby Timer] Sala ${roomId} fechada após 5 minutos sem iniciar`);
+  }, 300_000);
+  lobbyTimers.set(roomId, timer);
+}
+
 function cancelGameOverTimer(roomId: string): void {
   const t = gameOverTimers.get(roomId);
   if (t) { clearTimeout(t); gameOverTimers.delete(roomId); }
@@ -265,6 +288,7 @@ io.on("connection", (socket) => {
       const validatedName = validatePlayerName(name);
       const state = createRoom(socket.id, validatedName);
       socket.join(state.roomId);
+      startLobbyTimer(state.roomId);
       const player = state.players.find(p => p.id === socket.id);
       socket.emit("room:created", {
         roomId: state.roomId,
@@ -305,6 +329,11 @@ io.on("connection", (socket) => {
 
         if (result === 'invalid_name') {
           socket.emit("room:error", { message: "Nome inválido." });
+          return;
+        }
+
+        if (result === 'name_taken') {
+          socket.emit("room:error", { message: "Já existe um jogador com esse nome nesta sala." });
           return;
         }
 
@@ -370,6 +399,7 @@ io.on("connection", (socket) => {
       // Limpa o flag de game_over ao iniciar um novo jogo
       gameOverRooms.delete(roomId);
       cancelGameOverTimer(roomId);
+      cancelLobbyTimer(roomId);
       io.to(roomId).emit("game:stateUpdate", started);
       resetAfkTimer(roomId);
     }
@@ -599,8 +629,12 @@ io.on("connection", (socket) => {
     socket.leave(roomId);
 
     if (result !== null) {
-      // Room still exists — notify remaining players
+      // Room still exists — persist and notify remaining players
+      saveRoom(result);
       io.to(roomId).emit("game:stateUpdate", result);
+    } else {
+      // Room was deleted (last player left)
+      cancelLobbyTimer(roomId);
     }
     // Broadcast updated public room list
     io.emit("room:list", listPublicRooms());
@@ -610,6 +644,20 @@ io.on("connection", (socket) => {
   socket.on("player:quit", ({ roomId }: { roomId: string }) => {
     const state = getRoom(roomId);
     if (!state) return;
+
+    // In lobby phase, player:quit should behave like room:leave
+    if (state.phase === 'lobby') {
+      const result = disconnectPlayer(roomId, socket.id);
+      socket.leave(roomId);
+      if (result !== null) {
+        saveRoom(result);
+        io.to(roomId).emit("game:stateUpdate", result);
+      } else {
+        cancelLobbyTimer(roomId);
+      }
+      io.emit("room:list", listPublicRooms());
+      return;
+    }
 
     const quitterName = state.players.find((p) => p.id === socket.id)?.name ?? "Jogador";
     const nextTurnQuit = getNextPlayer(state, socket.id);
@@ -945,8 +993,14 @@ io.on("connection", (socket) => {
 
         if (state.phase === "lobby") {
           // No lobby: remove imediatamente
-          disconnectPlayer(roomId, socket.id);
-          io.to(roomId).emit("game:stateUpdate", state);
+          const lobbyResult = disconnectPlayer(roomId, socket.id);
+          if (lobbyResult === null) {
+            // Room deleted — cancel lobby timer
+            cancelLobbyTimer(roomId);
+          } else {
+            saveRoom(lobbyResult);
+            io.to(roomId).emit("game:stateUpdate", lobbyResult);
+          }
           // Broadcast updated room list
           io.emit("room:list", listPublicRooms());
           break;

@@ -41,15 +41,16 @@ export function saveRoom(state: GameState): void {
 
   const configStmt = db.prepare(`
     INSERT OR REPLACE INTO room_configs (
-      room_id, lives_per_player, fdp_rule, card_on_forehead_rule,
+      room_id, lives_per_player, fdp_rule, fdp_start_double_deck, card_on_forehead_rule,
       suit_tiebreaker_rule, max_rounds, deck_count, max_players
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   configStmt.run(
     state.roomId,
     state.config.livesPerPlayer,
     state.config.fdpRule ? 1 : 0,
+    state.config.fdpStartDoubleDeck ? 1 : 0,
     state.config.cardOnForeheadRule ? 1 : 0,
     state.config.suitTiebreakerRule ? 1 : 0,
     state.config.maxRounds,
@@ -67,9 +68,7 @@ export function saveRoom(state: GameState): void {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const insertPlayer = db.transaction((player: Player) => {
-    // Remove stale entries for this socket id in other rooms before inserting
-    db.prepare('DELETE FROM players WHERE id = ? AND room_id != ?').run(player.id, state.roomId);
+  state.players.forEach((player: Player) => {
     insertPlayerStmt.run(
       player.id,
       state.roomId,
@@ -83,8 +82,11 @@ export function saveRoom(state: GameState): void {
       player.wasKicked ? 1 : 0
     );
   });
+}
 
-  state.players.forEach(insertPlayer);
+// Update player's socket ID in DB after reconnect (avoids a full saveRoom)
+export function updatePlayerSocketId(roomId: string, oldSocketId: string, newSocketId: string): void {
+  db.prepare('UPDATE players SET id = ? WHERE id = ? AND room_id = ?').run(newSocketId, oldSocketId, roomId);
 }
 
 // Load room from database

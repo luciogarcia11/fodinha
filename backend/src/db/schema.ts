@@ -34,7 +34,7 @@ export function initializeDatabase() {
   // Players table
   db.exec(`
     CREATE TABLE IF NOT EXISTS players (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       room_id TEXT NOT NULL,
       name TEXT NOT NULL,
       lives INTEGER NOT NULL DEFAULT 3,
@@ -43,6 +43,7 @@ export function initializeDatabase() {
       is_eliminated INTEGER NOT NULL DEFAULT 0,
       session_id TEXT NOT NULL,
       joined_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+      PRIMARY KEY (id, room_id),
       FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
     )
   `);
@@ -53,6 +54,7 @@ export function initializeDatabase() {
       room_id TEXT PRIMARY KEY,
       lives_per_player INTEGER NOT NULL DEFAULT 3,
       fdp_rule INTEGER NOT NULL DEFAULT 0,
+      fdp_start_double_deck INTEGER NOT NULL DEFAULT 0,
       card_on_forehead_rule INTEGER NOT NULL DEFAULT 1,
       suit_tiebreaker_rule INTEGER NOT NULL DEFAULT 0,
       max_rounds INTEGER NOT NULL DEFAULT 0,
@@ -87,6 +89,50 @@ export function initializeDatabase() {
     db.exec(`ALTER TABLE players ADD COLUMN was_kicked INTEGER NOT NULL DEFAULT 0`);
   } catch (e) {
     // Column already exists, ignore error
+  }
+
+  // Migration: Add fdp_start_double_deck column to room_configs if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE room_configs ADD COLUMN fdp_start_double_deck INTEGER NOT NULL DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+
+  // Migration: Fix players PRIMARY KEY to composite (id, room_id) to allow same socket in different rooms
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='players'").get() as any;
+    if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('PRIMARY KEY (id, room_id)')) {
+      db.pragma('foreign_keys = OFF');
+      db.exec(`
+        CREATE TABLE players_new (
+          id TEXT NOT NULL,
+          room_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          lives INTEGER NOT NULL DEFAULT 3,
+          hand TEXT NOT NULL DEFAULT '[]',
+          connected INTEGER NOT NULL DEFAULT 1,
+          is_eliminated INTEGER NOT NULL DEFAULT 0,
+          session_id TEXT NOT NULL,
+          joined_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+          is_spectator INTEGER NOT NULL DEFAULT 0,
+          was_kicked INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (id, room_id),
+          FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+        );
+        INSERT INTO players_new
+          SELECT id, room_id, name, lives, hand, connected, is_eliminated, session_id,
+                 COALESCE(joined_at, strftime('%s', 'now')),
+                 COALESCE(is_spectator, 0), COALESCE(was_kicked, 0)
+          FROM players;
+        DROP TABLE players;
+        ALTER TABLE players_new RENAME TO players;
+      `);
+      db.pragma('foreign_keys = ON');
+      console.log('[Migration] players PRIMARY KEY migrated to composite (id, room_id)');
+    }
+  } catch (e) {
+    console.error('[Migration] Error migrating players PRIMARY KEY:', e);
+    db.pragma('foreign_keys = ON');
   }
 
   // Banned players table (persistent across sessions)

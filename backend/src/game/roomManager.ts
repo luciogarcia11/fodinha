@@ -14,6 +14,7 @@ import {
   banPlayer as banPlayerDB,
   getBannedPlayers,
   loadRoomLastActivity,
+  updatePlayerSocketId,
 } from '../db/rooms';
 
 // In-memory cache for active rooms (synced with SQLite)
@@ -112,7 +113,7 @@ export function updateRoomInCache(roomId: string, state: GameState): void {
   rooms.set(roomId, state);
 }
 
-export function joinRoom(roomId: string, playerId: string, playerName: string): { state: GameState; result: 'ok' | 'not_found' | 'full' | 'in_progress' | 'invalid_name' | 'banned' } {
+export function joinRoom(roomId: string, playerId: string, playerName: string): { state: GameState; result: 'ok' | 'not_found' | 'full' | 'in_progress' | 'invalid_name' | 'banned' | 'name_taken' } {
   const state = rooms.get(roomId);
   if (!state) return { state: null as any, result: 'not_found' };
   if (state.phase !== 'lobby') {
@@ -136,6 +137,10 @@ export function joinRoom(roomId: string, playerId: string, playerName: string): 
     existing.connected = true;
     return { state, result: 'ok' };
   }
+
+  // Name must be unique within this room
+  const nameTaken = state.players.some(p => p.name.toLowerCase() === playerName.trim().toLowerCase());
+  if (nameTaken) return { state: null as any, result: 'name_taken' };
 
   const newPlayer: Player = {
     id: playerId,
@@ -176,6 +181,10 @@ export function joinAsSpectator(roomId: string, socketId: string, playerName: st
     existing.connected = true;
     return state;
   }
+
+  // Name must be unique within this room (spectators included)
+  const nameTaken = state.players.some(p => p.name.toLowerCase() === playerName.trim().toLowerCase());
+  if (nameTaken) return null;
 
   const spectator: Player = {
     id: socketId,
@@ -232,9 +241,12 @@ export function rejoinRoom(roomId: string, sessionId: string, newSocketId: strin
     player.lives = 0;
   }
 
+  const oldSocketId = player.id;
   player.id = newSocketId;
   player.connected = true;
-  updateRoomActivity(roomId); // Update last activity
+  updateRoomActivity(roomId);
+  // Update socket ID in DB without a full saveRoom
+  updatePlayerSocketId(roomId, oldSocketId, newSocketId);
 
   return state;
 }

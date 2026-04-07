@@ -85,6 +85,14 @@ export function useGame() {
     socket.on("room:rejoinFailed", ({ message }: { message: string }) => {
       console.log('[useGame] Rejoin falhou:', message);
       clearSession();
+      window.location.href = "/";
+    });
+
+    socket.on("room:lobbyExpired", () => {
+      clearSession();
+      // room:closed will also fire and redirect, but clear state proactively
+      setRoomId("");
+      setGameState(null);
     });
 
     socket.on(
@@ -265,6 +273,8 @@ export function useGame() {
       socket.off("room:joinedAsSpectator");
       socket.off("spectator:queueUpdate");
       socket.off("spectator:promoted");
+      socket.off("room:rejoinFailed");
+      socket.off("room:lobbyExpired");
     };
   }, [roomId]);
 

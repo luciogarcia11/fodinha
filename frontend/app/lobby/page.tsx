@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGameContext } from "@/lib/gameContext";
 import Chat from "@/components/Chat";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -11,6 +11,22 @@ function LobbyContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const roomCode = searchParams.get("room") ?? roomId;
+
+  const lobbyEntryRef = useRef<number>(Date.now());
+  const [countdown, setCountdown] = useState(300);
+
+  useEffect(() => {
+    lobbyEntryRef.current = Date.now();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - lobbyEntryRef.current) / 1000);
+      const remaining = Math.max(0, 300 - elapsed);
+      setCountdown(remaining);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (gameState?.phase === "betting" || gameState?.phase === "playing") {
@@ -29,11 +45,18 @@ function LobbyContent() {
   const isHost = gameState.hostId === myId;
   const canStart = gameState.players.length >= 2;
 
+  const countdownMin = Math.floor(countdown / 60);
+  const countdownSec = String(countdown % 60).padStart(2, "0");
+  const countdownUrgent = countdown <= 60;
+
   return (
     <main className="min-h-screen flex flex-col items-center justify-center gap-6 p-4">
       <div className="text-center">
         <h1 className="text-4xl font-black text-yellow-400">🃏 Fodinha</h1>
         <p className="text-green-300 mt-1">Sala de espera</p>
+        <p className={`text-xs mt-1 ${countdownUrgent ? "text-red-400 font-bold animate-pulse" : "text-white/30"}`}>
+          ⏳ {countdownMin}:{countdownSec} para iniciar
+        </p>
       </div>
 
       <div className="bg-white/10 rounded-2xl px-8 py-4 text-center">
