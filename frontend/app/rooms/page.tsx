@@ -5,7 +5,7 @@ import { useGameContext } from "@/lib/gameContext";
 import { useRouter } from "next/navigation";
 
 export default function RoomsPage() {
-  const { publicRooms, fetchRooms, joinRoom, joinAsSpectator, watchableRooms, fetchWatchableRooms, roomId, gameState, error } = useGameContext();
+  const { publicRooms, fetchRooms, joinRoom, joinAsSpectator, watchableRooms, fetchWatchableRooms, roomId, gameState, error, joinedAsSpectator, clearJoinedAsSpectator } = useGameContext();
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState("");
   const router = useRouter();
@@ -13,7 +13,8 @@ export default function RoomsPage() {
   useEffect(() => {
     fetchRooms();
     fetchWatchableRooms();
-    const interval = setInterval(() => { fetchRooms(); fetchWatchableRooms(); }, 3000);
+    // Polling as fallback; real-time updates come via socket broadcasts
+    const interval = setInterval(() => { fetchRooms(); fetchWatchableRooms(); }, 8000);
     return () => clearInterval(interval);
   }, [fetchRooms, fetchWatchableRooms]);
 
@@ -61,6 +62,13 @@ export default function RoomsPage() {
       {(error || nameError) && (
         <div className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm">
           {nameError || error}
+        </div>
+      )}
+
+      {joinedAsSpectator && (
+        <div className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2">
+          <span>👁‍️ {joinedAsSpectator}</span>
+          <button onClick={clearJoinedAsSpectator} className="ml-auto text-white/60 hover:text-white">×</button>
         </div>
       )}
 
@@ -136,7 +144,9 @@ export default function RoomsPage() {
                   <div className="flex gap-2 text-[10px] text-white/40">
                     <span className="text-green-400/70">{phaseLabel[room.phase] ?? room.phase}</span>
                     <span>{room.playerCount} jogadores</span>
-                    {room.spectatorCount > 0 && <span>{room.spectatorCount} 👁️</span>}
+                    <span className={room.spectatorCount >= 10 ? "text-red-400/80" : "text-white/40"}>
+                      👁️ {room.spectatorCount}/10
+                    </span>
                     {room.config.fdpRule && <span className="text-yellow-400/60">FDP</span>}
                     <span>{room.config.livesPerPlayer}❤️</span>
                   </div>
@@ -146,7 +156,7 @@ export default function RoomsPage() {
                   disabled={room.spectatorCount >= 10}
                   className="bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold px-4 py-2 rounded-lg text-sm transition-all"
                 >
-                  Assistir
+                  {room.spectatorCount >= 10 ? "Lotado" : "Assistir"}
                 </button>
               </div>
             ))}

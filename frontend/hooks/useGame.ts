@@ -56,6 +56,9 @@ export function useGame() {
   const [watchableRooms, setWatchableRooms] = useState<WatchableRoomInfo[]>([]);
   const [voteKickCooldownUntil, setVoteKickCooldownUntil] = useState<number>(0);
   const [gameOverAt, setGameOverAt] = useState<number>(0);
+  const [joinedAsSpectator, setJoinedAsSpectator] = useState<string | null>(null);
+  const [spectatorQueuePosition, setSpectatorQueuePosition] = useState<number>(0);
+  const [promotedNames, setPromotedNames] = useState<string[] | null>(null);
 
   useEffect(() => {
     socket.connect();
@@ -222,6 +225,19 @@ export function useGame() {
       }, 3000); // Remove after 3 seconds
     });
 
+    socket.on("room:joinedAsSpectator", ({ message }: { message: string }) => {
+      setJoinedAsSpectator(message);
+    });
+
+    socket.on("spectator:queueUpdate", (positions: Array<{ playerId: string; position: number }>) => {
+      const myPos = positions.find(p => p.playerId === socket.id);
+      setSpectatorQueuePosition(myPos?.position ?? 0);
+    });
+
+    socket.on("spectator:promoted", ({ names }: { names: string[] }) => {
+      setPromotedNames(names);
+    });
+
     return () => {
       socket.off("connect");
       socket.off("room:created");
@@ -246,6 +262,9 @@ export function useGame() {
       socket.off("room:listWatchable");
       socket.off("global:chat");
       socket.off("reaction:new");
+      socket.off("room:joinedAsSpectator");
+      socket.off("spectator:queueUpdate");
+      socket.off("spectator:promoted");
     };
   }, [roomId]);
 
@@ -380,6 +399,22 @@ export function useGame() {
     }
   }, [roomId]);
 
+  const joinQueue = useCallback(() => {
+    if (roomId) {
+      socket.emit("spectator:joinQueue", { roomId });
+    }
+  }, [roomId]);
+
+  const leaveQueue = useCallback(() => {
+    if (roomId) {
+      socket.emit("spectator:leaveQueue", { roomId });
+      setSpectatorQueuePosition(0);
+    }
+  }, [roomId]);
+
+  const clearJoinedAsSpectator = useCallback(() => setJoinedAsSpectator(null), []);
+  const clearPromotedNames = useCallback(() => setPromotedNames(null), []);
+
   return {
     gameState,
     roomId,
@@ -400,6 +435,9 @@ export function useGame() {
     reactions,
     publicRooms,
     watchableRooms,
+    joinedAsSpectator,
+    spectatorQueuePosition,
+    promotedNames,
     createRoom,
     joinRoom,
     joinAsSpectator,
@@ -424,6 +462,10 @@ export function useGame() {
     fetchWatchableRooms,
     quitGame,
     becomeSpectator,
+    joinQueue,
+    leaveQueue,
+    clearJoinedAsSpectator,
+    clearPromotedNames,
     voteKickCooldownUntil,
     gameOverAt,
   };
