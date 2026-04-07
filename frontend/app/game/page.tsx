@@ -24,6 +24,13 @@ function GameContent() {
     quitGame,
     becomeSpectator,
     joinAsSpectator,
+    joinQueue,
+    leaveQueue,
+    spectatorQueuePosition,
+    joinedAsSpectator,
+    clearJoinedAsSpectator,
+    promotedNames,
+    clearPromotedNames,
     voteKickCooldownUntil,
     gameOverAt,
     playerQuitName,
@@ -130,6 +137,18 @@ function GameContent() {
     const t = setTimeout(() => clearPlayerQuit(), 3000);
     return () => clearTimeout(t);
   }, [playerQuitName, clearPlayerQuit]);
+
+  useEffect(() => {
+    if (!promotedNames || promotedNames.length === 0) return;
+    const t = setTimeout(() => clearPromotedNames(), 4000);
+    return () => clearTimeout(t);
+  }, [promotedNames, clearPromotedNames]);
+
+  useEffect(() => {
+    if (!joinedAsSpectator) return;
+    const t = setTimeout(() => clearJoinedAsSpectator(), 4000);
+    return () => clearTimeout(t);
+  }, [joinedAsSpectator, clearJoinedAsSpectator]);
 
   useEffect(() => {
     if (!playerDisconnectedName) return;
@@ -715,6 +734,21 @@ function GameContent() {
       {me && me.isSpectator && (
         <div className="flex items-center justify-center gap-4 py-3 shrink-0 bg-black/30 border-t border-white/10">
           <span className="text-white/50 text-sm font-bold">👁️ Assistindo a partida</span>
+          {spectatorQueuePosition > 0 ? (
+            <button
+              onClick={() => leaveQueue()}
+              className="text-xs text-yellow-400/90 bg-yellow-400/10 hover:bg-yellow-400/20 px-3 py-1.5 rounded-lg transition-all font-bold"
+            >
+              Na fila (#{spectatorQueuePosition}) ×
+            </button>
+          ) : (
+            <button
+              onClick={() => joinQueue()}
+              className="text-xs text-indigo-300/90 hover:text-indigo-200 bg-indigo-500/20 hover:bg-indigo-500/30 px-3 py-1.5 rounded-lg transition-all"
+            >
+              🎮 Entrar na fila
+            </button>
+          )}
           <button
             onClick={() => { quitGame(); setTimeout(() => { window.location.href = "/"; }, 100); }}
             className="text-xs text-red-400/70 hover:text-red-400 bg-red-900/20 hover:bg-red-900/40 px-3 py-1.5 rounded-lg transition-all"
@@ -895,13 +929,18 @@ function GameContent() {
             <p className="text-white/60 text-xs md:text-sm mb-5 md:mb-6">
               Você será eliminado e os outros jogadores continuarão sem você.
             </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowQuit(false)}
-                className="flex-1 bg-white/10 hover:bg-white/20 text-white font-bold py-2 rounded-lg text-sm"
-              >
-                Cancelar
-              </button>
+            <div className="flex flex-col gap-2">
+              {me && !me.isSpectator && !me.isEliminated && (
+                <button
+                  onClick={() => {
+                    becomeSpectator();
+                    setShowQuit(false);
+                  }}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg text-sm"
+                >
+                  👁️ Virar espectador
+                </button>
+              )}
               <button
                 onClick={() => {
                   quitGame();
@@ -909,18 +948,24 @@ function GameContent() {
                     window.location.href = "/";
                   }, 100);
                 }}
-                className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg text-sm"
+                className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg text-sm"
               >
-                Sair
+                Voltar pro início
+              </button>
+              <button
+                onClick={() => setShowQuit(false)}
+                className="w-full bg-white/10 hover:bg-white/20 text-white font-bold py-2 rounded-lg text-sm"
+              >
+                Cancelar
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Painel fim de rodada */}
+      {/* Modal: Resultado da rodada */}
       {roundEnd && (
-        <div className="absolute inset-0 bg-black/75 flex items-center justify-center z-40 p-3 md:p-4">
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 rounded-2xl p-4 md:p-6 w-full max-w-sm">
             <h2 className="text-base md:text-xl font-black text-yellow-400 text-center mb-3 md:mb-4">
               Resultado — Rodada {gameState.round}
@@ -992,6 +1037,16 @@ function GameContent() {
         {voteComplete && (
           <div className="bg-purple-900/90 text-white text-xs md:text-sm px-4 py-2 rounded-xl border border-purple-700">
             🗳️ {voteComplete.targetName} foi expulso por votação!
+          </div>
+        )}
+        {promotedNames && promotedNames.length > 0 && (
+          <div className="bg-indigo-900/90 text-white text-xs md:text-sm px-4 py-2 rounded-xl border border-indigo-700">
+            🎮 {promotedNames.join(", ")} {promotedNames.length === 1 ? "entrou" : "entraram"} na partida!
+          </div>
+        )}
+        {joinedAsSpectator && (
+          <div className="bg-indigo-900/90 text-white text-xs md:text-sm px-4 py-2 rounded-xl border border-indigo-600">
+            👁️ Sala cheia — você entrou como espectador
           </div>
         )}
       </div>
