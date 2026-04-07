@@ -393,6 +393,16 @@ export function useGame() {
     }
   }, [roomId]);
 
+  const leaveRoom = useCallback(() => {
+    if (roomId) {
+      socket.emit("room:leave", { roomId });
+    }
+    clearSession();
+    setChatMessages([]);
+    setRoomId("");
+    setGameState(null);
+  }, [roomId]);
+
   const becomeSpectator = useCallback(() => {
     if (roomId) {
       socket.emit("player:becomeSpectator", { roomId });
@@ -461,6 +471,7 @@ export function useGame() {
     fetchRooms,
     fetchWatchableRooms,
     quitGame,
+    leaveRoom,
     becomeSpectator,
     joinQueue,
     leaveQueue,

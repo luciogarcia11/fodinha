@@ -159,6 +159,10 @@ export default function Home() {
           </button>
         </div>
       )}
+
+      <span className="fixed bottom-3 left-3 text-[10px] text-white/10 select-none pointer-events-none">
+        Hoc iussu magorum factum est.
+      </span>
     </main>
   );
 }

@@ -590,6 +590,22 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("game:stateUpdate", state);
   });
 
+  // ===== ROOM:LEAVE (lobby only) =====
+  socket.on("room:leave", ({ roomId }: { roomId: string }) => {
+    const state = getRoom(roomId);
+    if (!state || state.phase !== "lobby") return;
+
+    const result = disconnectPlayer(roomId, socket.id);
+    socket.leave(roomId);
+
+    if (result !== null) {
+      // Room still exists — notify remaining players
+      io.to(roomId).emit("game:stateUpdate", result);
+    }
+    // Broadcast updated public room list
+    io.emit("room:list", listPublicRooms());
+  });
+
   // ===== PLAYER:QUIT =====
   socket.on("player:quit", ({ roomId }: { roomId: string }) => {
     const state = getRoom(roomId);

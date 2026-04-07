@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 function LobbyContent() {
-  const { gameState, myId, startGame, updateConfig, roomId, chatMessages, sendChat, globalChatMessages, sendGlobalChat, quitGame } = useGameContext();
+  const { gameState, myId, startGame, updateConfig, roomId, chatMessages, sendChat, globalChatMessages, sendGlobalChat, leaveRoom } = useGameContext();
   const router = useRouter();
   const searchParams = useSearchParams();
   const roomCode = searchParams.get("room") ?? roomId;
@@ -250,7 +250,7 @@ function LobbyContent() {
 
       {/* Botão de sair da sala */}
       <button
-        onClick={() => { quitGame(); router.push("/"); }}
+        onClick={() => { leaveRoom(); router.push("/"); }}
         className="w-full max-w-sm bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl text-center transition-all shadow-lg flex items-center justify-center gap-2"
       >
         🏠 Sair da Sala
