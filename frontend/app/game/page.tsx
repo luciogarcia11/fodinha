@@ -303,11 +303,14 @@ function GameContent() {
   // Sequência: esquerda → topo → direita (ordem de jogo da esq p/ dir).
   const playOrder = gameState.bettingOrder; // IDs na ordem de jogo
   const myOrderIndex = playOrder.indexOf(myId);
-  // Monta lista dos outros na sequência a partir do próximo após mim
+  // Monta lista dos outros na sequência a partir do próximo após mim.
+  // Espectadores (myOrderIndex === -1) não estão no bettingOrder: percorrem todos os n jogadores.
+  // Jogadores percorrem n-1 (excluem a si mesmos).
   const othersOrdered = (() => {
     const result: typeof gameState.players = [];
     const n = playOrder.length;
-    for (let i = 1; i < n; i++) {
+    const loopMax = myOrderIndex === -1 ? n + 1 : n;
+    for (let i = 1; i < loopMax; i++) {
       const id = playOrder[(myOrderIndex + i) % n];
       const p = gameState.players.find((p) => p.id === id);
       if (p && !p.isEliminated && !p.isSpectator) result.push(p);

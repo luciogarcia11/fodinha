@@ -246,6 +246,14 @@ export function rejoinRoom(roomId: string, sessionId: string, newSocketId: strin
   const oldSocketId = player.id;
   player.id = newSocketId;
   player.connected = true;
+
+  // Atualiza referências de socket ID para evitar dessincronização de assentos e turnos
+  const bettingIdx = state.bettingOrder.indexOf(oldSocketId);
+  if (bettingIdx !== -1) state.bettingOrder[bettingIdx] = newSocketId;
+  if (state.currentTurn === oldSocketId) state.currentTurn = newSocketId;
+  if (state.trickLeader === oldSocketId) state.trickLeader = newSocketId;
+  if (state.hostId === oldSocketId) state.hostId = newSocketId;
+
   updateRoomActivity(roomId);
   // Update socket ID in DB without a full saveRoom
   updatePlayerSocketId(roomId, oldSocketId, newSocketId);
