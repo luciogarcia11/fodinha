@@ -1,5 +1,5 @@
 import { GameState, GameConfig, Player, ChatMessage } from '../types';
-import { buildDeck, buildMultiDeck, shuffleDeck, dealCards, CARDS_PER_DECK, MAX_DECKS, MAX_TOTAL_CARDS, INSANITY_MAX_DECKS, INSANITY_MAX_TOTAL_CARDS } from './deck';
+import { buildMultiDeck, shuffleDeck, dealCards, CARDS_PER_DECK, MAX_DECKS, MAX_TOTAL_CARDS, INSANITY_MAX_DECKS, INSANITY_MAX_TOTAL_CARDS } from './deck';
 import { getCardsForRound } from './logic';
 import crypto from 'crypto';
 import {
@@ -15,6 +15,8 @@ import {
   getBannedPlayers,
   loadRoomLastActivity,
   updatePlayerSocketId,
+  listPublicRooms as listPublicRoomsDB,
+  listWatchableRoomsDB,
 } from '../db/rooms';
 
 // In-memory cache for active rooms (synced with SQLite)
@@ -38,10 +40,9 @@ function generateSessionId(): string {
   return crypto.randomUUID();
 }
 
-export function createRoom(hostId: string, hostName: string): GameState {
-  // Cleanup old rooms before creating new one to prevent accumulation
-  cleanupEmptyRooms();
-  
+export async function createRoom(hostId: string, hostName: string): Promise<GameState> {
+  await cleanupEmptyRooms();
+
   const roomId = generateRoomCode();
   const config: GameConfig = {
     livesPerPlayer: 3,
@@ -96,7 +97,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
   };
 
   rooms.set(roomId, state);
-  saveRoom(state); // Persist to SQLite
+  await saveRoom(state);
   return state;
 }
 
@@ -115,7 +116,7 @@ export function updateRoomInCache(roomId: string, state: GameState): void {
   rooms.set(roomId, state);
 }
 
-export function joinRoom(roomId: string, playerId: string, playerName: string): { state: GameState; result: 'ok' | 'not_found' | 'full' | 'in_progress' | 'invalid_name' | 'banned' | 'name_taken' } {
+export async function joinRoom(roomId: string, playerId: string, playerName: string): Promise<{ state: GameState; result: 'ok' | 'not_found' | 'full' | 'in_progress' | 'invalid_name' | 'banned' | 'name_taken' }> {
   const state = rooms.get(roomId);
   if (!state) return { state: null as any, result: 'not_found' };
   if (state.phase !== 'lobby') {
@@ -123,8 +124,7 @@ export function joinRoom(roomId: string, playerId: string, playerName: string): 
     return { state, result: 'in_progress' };
   }
 
-  // Check if player is banned
-  if (isPlayerBanned(roomId, playerId)) return { state: null as any, result: 'banned' };
+  if (await isPlayerBanned(roomId, playerId)) return { state: null as any, result: 'banned' };
 
   const nonSpectators = state.players.filter(p => !p.isSpectator).length;
   if (nonSpectators >= state.config.maxPlayers) return { state, result: 'full' };
@@ -157,7 +157,7 @@ export function joinRoom(roomId: string, playerId: string, playerName: string): 
   };
 
   state.players.push(newPlayer);
-  saveRoom(state); // Persist to SQLite
+  await saveRoom(state);
 
   return { state, result: 'ok' };
 }
@@ -167,7 +167,7 @@ export function joinRoom(roomId: string, playerId: string, playerName: string): 
  * Máximo de 10 espectadores por sala. Não adiciona ao bettingOrder.
  * Permite lobby (para salas cheias) e partidas ativas.
  */
-export function joinAsSpectator(roomId: string, socketId: string, playerName: string): GameState | null {
+export async function joinAsSpectator(roomId: string, socketId: string, playerName: string): Promise<GameState | null> {
   const state = rooms.get(roomId);
   if (!state) return null;
   if (state.phase === 'game_over') return null;
@@ -201,7 +201,7 @@ export function joinAsSpectator(roomId: string, socketId: string, playerName: st
   };
 
   state.players.push(spectator);
-  saveRoom(state);
+  await saveRoom(state);
 
   return state;
 }
@@ -211,20 +211,17 @@ export function joinAsSpectator(roomId: string, socketId: string, playerName: st
  * Atualiza o socket id do jogador e cancela o timer de desconexão.
  * Garante que o cache em memória esteja sincronizado com o banco de dados.
  */
-export function rejoinRoom(roomId: string, sessionId: string, newSocketId: string): GameState | null {
-  // Prefer in-memory state to avoid overwriting concurrent changes.
-  // Only fall back to DB if room is not in memory (cold-start recovery).
+export async function rejoinRoom(roomId: string, sessionId: string, newSocketId: string): Promise<GameState | null> {
   const liveState = rooms.get(roomId);
-  const state = liveState ?? loadRoom(roomId);
+  const state = liveState ?? await loadRoom(roomId);
   if (!state) return null;
 
   if (!liveState) {
     rooms.set(roomId, state);
-    console.log(`[Rejoin] Sala ${roomId} carregada do banco para jogador ${newSocketId} - chatMessages: ${state.chatMessages.length}`);
+    console.log(`[Rejoin] Sala ${roomId} carregada do banco — chatMessages: ${state.chatMessages.length}`);
   }
 
-  // Check if this session is banned (from SQLite)
-  if (isPlayerBanned(roomId, sessionId)) return null;
+  if (await isPlayerBanned(roomId, sessionId)) return null;
 
   const player = state.players.find(p => p.sessionId === sessionId);
   if (!player) return null;
@@ -254,9 +251,8 @@ export function rejoinRoom(roomId: string, sessionId: string, newSocketId: strin
   if (state.trickLeader === oldSocketId) state.trickLeader = newSocketId;
   if (state.hostId === oldSocketId) state.hostId = newSocketId;
 
-  updateRoomActivity(roomId);
-  // Update socket ID in DB without a full saveRoom
-  updatePlayerSocketId(roomId, oldSocketId, newSocketId);
+  await updateRoomActivity(roomId);
+  await updatePlayerSocketId(roomId, oldSocketId, newSocketId);
 
   return state;
 }
@@ -276,7 +272,7 @@ export function recalcMaxRounds(state: GameState): void {
   state.config.maxRounds = Math.floor(maxCards / activePlayers.length);
 }
 
-export function startGame(roomId: string): GameState | null {
+export async function startGame(roomId: string): Promise<GameState | null> {
   const state = rooms.get(roomId);
   if (!state || state.players.length < 2) return null;
 
@@ -289,10 +285,10 @@ export function startGame(roomId: string): GameState | null {
 
   state.dealerIndex = 0;
   state.round = 1;
-  state.bannedIds = getBannedPlayers(roomId);
+  state.bannedIds = await getBannedPlayers(roomId);
 
   recalcMaxRounds(state);
-  saveRoom(state);
+  await saveRoom(state);
   return dealRound(state);
 }
 
@@ -351,15 +347,14 @@ export function dealRound(state: GameState): GameState {
   return state;
 }
 
-export function updateConfig(roomId: string, config: Partial<GameConfig>): GameState | null {
+export async function updateConfig(roomId: string, config: Partial<GameConfig>): Promise<GameState | null> {
   const state = rooms.get(roomId);
   if (!state || state.phase !== 'lobby') return null;
-  // Valida maxPlayers (2-20)
   if (config.maxPlayers !== undefined) {
     config.maxPlayers = Math.max(2, Math.min(20, Math.floor(config.maxPlayers)));
   }
   state.config = { ...state.config, ...config };
-  saveRoom(state);
+  await saveRoom(state);
   return state;
 }
 
@@ -369,11 +364,11 @@ export function updateConfig(roomId: string, config: Partial<GameConfig>): GameS
  * No lobby: remove imediatamente.
  * Retorna callback para quando o timer disparar (para eliminar e notificar).
  */
-export function disconnectPlayer(
+export async function disconnectPlayer(
   roomId: string,
   playerId: string,
-  onEliminate?: () => void
-): GameState | null {
+  onEliminate?: () => void | Promise<void>,
+): Promise<GameState | null> {
   const state = rooms.get(roomId);
   if (!state) return null;
 
@@ -395,7 +390,7 @@ export function disconnectPlayer(
     const playerName = player.name;
 
     // Inicia timer de reconexão (30 segundos)
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       try {
         disconnectTimers.delete(sessionId);
         const currentState = rooms.get(roomId);
@@ -421,7 +416,7 @@ export function disconnectPlayer(
         currentPlayer.lives = 0;
 
         if (onEliminate) {
-          onEliminate();
+          await onEliminate();
         }
       } catch (error) {
         console.error('[Disconnect Timer] Erro ao processar eliminação:', error);
@@ -432,12 +427,11 @@ export function disconnectPlayer(
     // No lobby: remove jogador imediatamente
     state.players = state.players.filter(p => p.id !== playerId);
     
-    // Se era o host e é o último jogador no lobby, deleta a sala
     if (playerId === state.hostId && state.players.length === 0) {
       console.log(`🗑️ Deletando sala ${roomId} - host saiu e sala ficou vazia`);
       rooms.delete(roomId);
-      deleteRoomDB(roomId);
-      return null; // Indica que a sala foi deletada
+      await deleteRoomDB(roomId);
+      return null;
     }
   }
 
@@ -452,43 +446,38 @@ export function disconnectPlayer(
   return state;
 }
 
-export function deleteRoom(roomId: string): void {
+export async function deleteRoom(roomId: string): Promise<void> {
   rooms.delete(roomId);
-  deleteRoomDB(roomId); // Delete from SQLite
+  await deleteRoomDB(roomId);
 }
 
 /**
  * Lista salas públicas no lobby para o hub de salas.
  * Combina cache em memória com dados do SQLite.
  */
-export function listPublicRooms(): Array<{
+export async function listPublicRooms(): Promise<Array<{
   roomId: string;
   hostName: string;
   playerCount: number;
   maxPlayers: number;
   config: GameConfig;
-}> {
-  // Get from SQLite for persistence
-  const dbRooms = require('../db/rooms').listPublicRooms();
-
-  // Merge with in-memory cache for real-time player counts
-  const result = dbRooms.map((dbRoom: any) => {
-    const cachedRoom = rooms.get(dbRoom.roomId);
+}>> {
+  const dbRooms = await listPublicRoomsDB();
+  return dbRooms.map((dbRoom) => {
+    const cached = rooms.get(dbRoom.roomId);
     return {
       ...dbRoom,
-      playerCount: cachedRoom
-        ? cachedRoom.players.filter((p: any) => !p.isSpectator).length
+      playerCount: cached
+        ? cached.players.filter((p) => !p.isSpectator).length
         : dbRoom.playerCount,
     };
   });
-
-  return result;
 }
 
 /**
  * Lista salas públicas em andamento para espectadores externos.
  */
-export function listWatchableRooms(): Array<{
+export async function listWatchableRooms(): Promise<Array<{
   roomId: string;
   hostName: string;
   phase: string;
@@ -496,21 +485,20 @@ export function listWatchableRooms(): Array<{
   spectatorCount: number;
   maxPlayers: number;
   config: GameConfig;
-}> {
-  const dbRooms = require('../db/rooms').listWatchableRoomsDB();
-
-  return dbRooms.map((dbRoom: any) => {
-    const cachedRoom = rooms.get(dbRoom.roomId);
-    return {
-      ...dbRoom,
-      playerCount: cachedRoom
-        ? cachedRoom.players.filter((p: any) => !p.isSpectator && !p.isEliminated).length
-        : dbRoom.playerCount,
-      spectatorCount: cachedRoom
-        ? cachedRoom.players.filter((p: any) => p.isSpectator).length
-        : 0,
-    };
-  }).filter((r: any) => r.playerCount > 0);
+}>> {
+  const dbRooms = await listWatchableRoomsDB();
+  return dbRooms
+    .map((dbRoom) => {
+      const cached = rooms.get(dbRoom.roomId);
+      return {
+        ...dbRoom,
+        playerCount: cached
+          ? cached.players.filter((p) => !p.isSpectator && !p.isEliminated).length
+          : dbRoom.playerCount,
+        spectatorCount: cached ? cached.players.filter((p) => p.isSpectator).length : 0,
+      };
+    })
+    .filter((r) => r.playerCount > 0);
 }
 
 /**
@@ -519,9 +507,8 @@ export function listWatchableRooms(): Array<{
  * Verifica last_activity para não remover salas recentemente ativas (menos de 30 minutos).
  * Não remove salas que têm timers de reconexão ativos.
  */
-export function cleanupEmptyRooms(): { removedCount: number; details: Array<{ roomId: string; phase: string; lastActivity?: number }> } {
+export async function cleanupEmptyRooms(): Promise<{ removedCount: number; details: Array<{ roomId: string; phase: string; lastActivity?: number }> }> {
   const removedRooms: Array<{ roomId: string; phase: string; lastActivity?: number }> = [];
-  // Salas inativas há mais de 15 minutos sem nenhum jogador conectado são elegíveis para remoção.
   const fifteenMinutesAgo = Math.floor(Date.now() / 1000) - 900;
 
   for (const [roomId, state] of rooms) {
@@ -545,16 +532,15 @@ export function cleanupEmptyRooms(): { removedCount: number; details: Array<{ ro
 
       // Get last activity from DB to check if room is recently active
       try {
-        const lastActivity = loadRoomLastActivity(roomId);
+        const lastActivity = await loadRoomLastActivity(roomId);
 
-        // Don't remove if recently active (less than 15 minutes)
         if (lastActivity && lastActivity > fifteenMinutesAgo) {
           console.log(`⏸️  Sala ${roomId} mantida (atividade recente: ${new Date(lastActivity * 1000).toISOString()})`);
           continue;
         }
 
         rooms.delete(roomId);
-        deleteRoomDB(roomId);
+        await deleteRoomDB(roomId);
 
         // Limpa timers de desconexão associados a esta sala
         state.players.forEach(player => {
@@ -592,19 +578,16 @@ export function cleanupEmptyRooms(): { removedCount: number; details: Array<{ ro
  * Adiciona mensagem de chat à sala com rate limiting.
  * Sempre salva no banco de dados primeiro e depois atualiza o cache.
  */
-export function addChatMessage(
+export async function addChatMessage(
   roomId: string,
   playerId: string,
   playerName: string,
-  text: string
-): ChatMessage | null {
+  text: string,
+): Promise<ChatMessage | null> {
   const state = rooms.get(roomId);
   if (!state) return null;
 
-  // Rate limiting: 3 messages per 30 seconds
-  if (!checkRateLimit(playerId, roomId, 'chat', 3, 30)) {
-    return null; // Rate limit exceeded
-  }
+  if (!await checkRateLimit(playerId, roomId, 'chat', 3, 30)) return null;
 
   // Sanitize text
   const sanitized = text
@@ -614,16 +597,12 @@ export function addChatMessage(
 
   if (!sanitized) return null;
 
-  // First save to database
-  const message = addRoomChatMessage(roomId, playerId, playerName, sanitized);
+  const message = await addRoomChatMessage(roomId, playerId, playerName, sanitized);
 
-  // Then update in-memory cache
   state.chatMessages.push(message);
-  if (state.chatMessages.length > 30) {
-    state.chatMessages = state.chatMessages.slice(-30);
-  }
+  if (state.chatMessages.length > 30) state.chatMessages = state.chatMessages.slice(-30);
 
-  updateRoomActivity(roomId);
+  await updateRoomActivity(roomId);
   console.log(`[Chat] Mensagem adicionada à sala ${roomId}: ${playerName} - ${sanitized.substring(0, 30)}...`);
   return message;
 }
@@ -631,28 +610,19 @@ export function addChatMessage(
 /**
  * Adiciona reação de emoji à sala (tipo Meet).
  */
-export function addReaction(roomId: string, playerId: string, emoji: string): void {
-  if (!checkRateLimit(playerId, roomId, 'reaction', 10, 60)) {
-    return; // Rate limit exceeded
-  }
-
-  addRoomReaction(roomId, playerId, emoji);
-  updateRoomActivity(roomId);
+export async function addReaction(roomId: string, playerId: string, emoji: string): Promise<void> {
+  if (!await checkRateLimit(playerId, roomId, 'reaction', 10, 60)) return;
+  await addRoomReaction(roomId, playerId, emoji);
+  await updateRoomActivity(roomId);
 }
 
 /**
  * Ban player (persistent).
  */
-export function banPlayer(roomId: string, sessionId: string, bannedBy: string, reason?: string): void {
-  banPlayerDB(roomId, sessionId, bannedBy, reason);
-
-  // Update in-memory state
+export async function banPlayer(roomId: string, sessionId: string, bannedBy: string, reason?: string): Promise<void> {
+  await banPlayerDB(roomId, sessionId, bannedBy, reason);
   const state = rooms.get(roomId);
-  if (state) {
-    if (!state.bannedIds.includes(sessionId)) {
-      state.bannedIds.push(sessionId);
-    }
-  }
+  if (state && !state.bannedIds.includes(sessionId)) state.bannedIds.push(sessionId);
 }
 
 /**
@@ -687,7 +657,7 @@ export function leaveSpectatorQueue(roomId: string, playerId: string): void {
  * Promove o primeiro espectador da fila para jogador ativo.
  * Vidas = max(1, floor(média de vidas dos jogadores ativos) - 1)
  */
-export function promoteSpectatorFromQueue(roomId: string): Player | null {
+export async function promoteSpectatorFromQueue(roomId: string): Promise<Player | null> {
   const state = rooms.get(roomId);
   if (!state || state.spectatorQueue.length === 0) return null;
 
@@ -712,7 +682,7 @@ export function promoteSpectatorFromQueue(roomId: string): Player | null {
     player.wasKicked = false;
     player.hand = [];
 
-    saveRoom(state);
+    await saveRoom(state);
     return player;
   }
 
