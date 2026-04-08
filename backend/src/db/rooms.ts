@@ -107,8 +107,10 @@ export function loadRoom(roomId: string): GameState | null {
     suitTiebreakerRule: !!configRow?.suit_tiebreaker_rule,
     maxRounds: configRow?.max_rounds || 0,
     isPublic: !!room.is_public,
-    deckCount: (configRow?.deck_count || 1) as 1 | 2,
+    deckCount: configRow?.deck_count || 1,
     maxPlayers: configRow?.max_players || 14,
+    forceTwoDecks: !!configRow?.force_two_decks,
+    insanityMode: !!configRow?.insanity_mode,
   };
 
   const playersStmt = db.prepare('SELECT * FROM players WHERE room_id = ?');
@@ -203,8 +205,10 @@ export function listPublicRooms(): Array<{
         suitTiebreakerRule: !!row.suit_tiebreaker_rule,
         maxRounds: row.max_rounds || 0,
         isPublic: true,
-        deckCount: (row.deck_count || 1) as 1 | 2,
+        deckCount: row.deck_count || 1,
         maxPlayers: row.max_players || 14,
+        forceTwoDecks: !!row.force_two_decks,
+        insanityMode: !!row.insanity_mode,
       },
     }))
     .filter(room => room.playerCount > 0); // Only show rooms with players
@@ -250,8 +254,10 @@ export function listWatchableRoomsDB(): Array<{
         suitTiebreakerRule: !!row.suit_tiebreaker_rule,
         maxRounds: row.max_rounds || 0,
         isPublic: true,
-        deckCount: (row.deck_count || 1) as 1 | 2,
+        deckCount: row.deck_count || 1,
         maxPlayers: row.max_players || 14,
+        forceTwoDecks: !!row.force_two_decks,
+        insanityMode: !!row.insanity_mode,
       },
     }))
     .filter(room => room.playerCount > 0);
