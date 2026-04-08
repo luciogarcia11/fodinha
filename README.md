@@ -71,6 +71,23 @@ npm run dev
 
 > **Variáveis de ambiente:** em produção defina `NEXT_PUBLIC_BACKEND_URL` no frontend apontando para o backend. Em desenvolvimento o cliente usa `http://localhost:4000` por padrão.
 
+### Painel visual do banco (opcional)
+
+Para abrir o SQLite local salvo em `backend/data/fodinha.db` com interface web:
+
+```bash
+bash ./db-admin.sh
+```
+
+O painel sobe em `http://127.0.0.1:8081` e permite navegar, editar registros e executar SQL.
+
+Se o backend estiver rodando via Docker Compose com o volume nomeado de produção, use o perfil opcional em `backend/docker-compose.yml`:
+
+```bash
+cd backend
+docker compose --profile db-admin up -d db-admin
+```
+
 ---
 
 ## Funcionalidades

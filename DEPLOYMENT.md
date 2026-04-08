@@ -75,6 +75,36 @@ O Docker Compose já está configurado com:
 - Caddy proxy reverso (SSL automático)
 - Volume persistente para SQLite
 
+### 3. Painel visual do banco (opcional)
+
+O Compose inclui um serviço `db-admin` com `sqlite-web`, desligado por padrão e preso em `127.0.0.1:8081` para não expor o banco publicamente.
+
+```bash
+cd backend
+docker compose --profile db-admin up -d db-admin
+```
+
+Abra no próprio servidor:
+
+```text
+http://127.0.0.1:8081
+```
+
+Para acessar remotamente sem publicar a porta na internet, faça um túnel SSH:
+
+```bash
+ssh -L 8081:127.0.0.1:8081 usuario@seu-servidor
+```
+
+Depois abra `http://127.0.0.1:8081` no navegador local.
+
+Para desligar o painel:
+
+```bash
+cd backend
+docker compose --profile db-admin stop db-admin
+```
+
 ---
 
 ## 🖥️ Deploy Manual (VPS)
