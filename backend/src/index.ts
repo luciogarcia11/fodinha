@@ -68,26 +68,26 @@ app.use(express.json({ limit: '10kb' }));
 const httpServer = createServer(app);
 
 // Initialize database
-initializeDatabase();
-console.log('💾 SQLite database initialized');
+initializeDatabase()
+  .then(() => console.log('💾 PostgreSQL database initialized'))
+  .catch(err => { console.error('Failed to initialize PostgreSQL:', err); process.exit(1); });
 
 // Periodic cleanup
-setInterval(() => {
-  cleanupExpiredRateLimits();
-  cleanupOldReactions();
+setInterval(async () => {
+  await cleanupExpiredRateLimits();
+  await cleanupOldReactions();
 }, 60000);
 
 // More frequent cleanup of empty rooms (every 15 seconds)
-// cleanupInactiveRooms removes from SQLite; we then purge the same rooms from the in-memory Map.
-setInterval(() => {
-  const deletedIds = cleanupInactiveRooms();
+setInterval(async () => {
+  const deletedIds = await cleanupInactiveRooms();
   for (const roomId of deletedIds) {
     cancelLobbyTimer(roomId);
     cancelGameOverTimer(roomId);
-    deleteRoom(roomId); // idempotent: no-op if already removed from memory
+    await deleteRoom(roomId);
   }
   if (deletedIds.length > 0) {
-    io.emit("room:list", listPublicRooms());
+    io.emit("room:list", await listPublicRooms());
   }
 }, 15000);
 
@@ -100,7 +100,7 @@ const io = new Server(httpServer, {
 });
 
 // Cleanup de salas vazias periódico (a cada 30s)
-setInterval(() => cleanupEmptyRooms(), 30000);
+setInterval(async () => cleanupEmptyRooms(), 30000);
 
 // Timers de vote-kick (roomId → timeout)
 const voteKickTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -140,14 +140,14 @@ function cancelLobbyTimer(roomId: string): void {
 
 function startLobbyTimer(roomId: string): void {
   cancelLobbyTimer(roomId);
-  const timer = setTimeout(() => {
+  const timer = setTimeout(async () => {
     const state = getRoom(roomId);
     lobbyTimers.delete(roomId);
     if (!state || state.phase !== 'lobby') return;
-    deleteRoom(roomId);
+    await deleteRoom(roomId);
     io.to(roomId).emit('room:lobbyExpired', { message: 'O lobby expirou por inatividade.' });
     io.to(roomId).emit('room:closed');
-    io.emit('room:list', listPublicRooms());
+    io.emit('room:list', await listPublicRooms());
     console.log(`[Lobby Timer] Sala ${roomId} fechada após 5 minutos sem iniciar`);
   }, 300_000);
   lobbyTimers.set(roomId, timer);
@@ -160,8 +160,8 @@ function cancelGameOverTimer(roomId: string): void {
 
 function startGameOverTimer(roomId: string): void {
   cancelGameOverTimer(roomId);
-  const timer = setTimeout(() => {
-    deleteRoom(roomId);
+  const timer = setTimeout(async () => {
+    await deleteRoom(roomId);
     gameOverRooms.delete(roomId);
     gameOverTimers.delete(roomId);
     io.to(roomId).emit('room:closed');
@@ -193,7 +193,7 @@ function resetAfkTimer(roomId: string) {
  * Verifica se o jogo acabou de forma segura, evitando game_over duplicado.
  * Retorna true se o game_over foi emitido, false caso contrário.
  */
-function checkAndEmitGameOver(roomId: string, state: any): boolean {
+async function checkAndEmitGameOver(roomId: string, state: any): Promise<boolean> {
   if (gameOverRooms.has(roomId)) {
     console.log(`[Game Over] Sala ${roomId} já está em game_over, ignorando`);
     return false;
@@ -203,7 +203,7 @@ function checkAndEmitGameOver(roomId: string, state: any): boolean {
   if (remaining.length < 2) {
     state.phase = "game_over";
     gameOverRooms.add(roomId);
-    saveRoom(state);
+    await saveRoom(state);
     const winner = remaining[0];
     io.to(roomId).emit("game:over", { winnerId: winner?.id ?? null });
     startGameOverTimer(roomId);
@@ -221,7 +221,7 @@ function clearAfkTimer(roomId: string) {
   }
 }
 
-function handleAfkKick(roomId: string) {
+async function handleAfkKick(roomId: string) {
   try {
     const state = getRoom(roomId);
     if (!state) return;
@@ -266,7 +266,7 @@ function handleAfkKick(roomId: string) {
   io.to(roomId).emit("game:playerQuit", { playerName: target.name });
   recalcMaxRounds(state);
 
-  if (checkAndEmitGameOver(roomId, state)) {
+  if (await checkAndEmitGameOver(roomId, state)) {
     clearAfkTimer(roomId);
   } else {
     resetAfkTimer(roomId);
@@ -282,16 +282,15 @@ io.on("connection", (socket) => {
   console.log(`🔌 Conectado: ${socket.id}`);
 
   // ===== ROOM:CREATE =====
-  socket.on("room:create", ({ name }: { name: string }) => {
+  socket.on("room:create", async ({ name }: { name: string }) => {
     try {
-      // Rate limiting: 1 sala por minuto por IP/socket
-      if (!checkRateLimit(socket.id, undefined, 'create_room', 1, 60)) {
+      if (!await checkRateLimit(socket.id, undefined, 'create_room', 1, 60)) {
         socket.emit("room:error", { message: "Aguarde 1 minuto antes de criar outra sala." });
         return;
       }
 
       const validatedName = validatePlayerName(name);
-      const state = createRoom(socket.id, validatedName);
+      const state = await createRoom(socket.id, validatedName);
       socket.join(state.roomId);
       startLobbyTimer(state.roomId);
       const player = state.players.find(p => p.id === socket.id);
@@ -300,8 +299,7 @@ io.on("connection", (socket) => {
         state,
         sessionId: player?.sessionId,
       });
-      // Broadcast updated room list
-      io.emit("room:list", listPublicRooms());
+      io.emit("room:list", await listPublicRooms());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao criar sala';
       socket.emit("room:error", { message });
@@ -311,40 +309,27 @@ io.on("connection", (socket) => {
   // ===== ROOM:JOIN =====
   socket.on(
     "room:join",
-    ({ roomId, name }: { roomId: string; name: string }) => {
+    async ({ roomId, name }: { roomId: string; name: string }) => {
       try {
         const validatedName = validatePlayerName(name);
         const validatedRoomId = validateRoomId(roomId);
-        const { state, result } = joinRoom(validatedRoomId, socket.id, validatedName);
+        const { state, result } = await joinRoom(validatedRoomId, socket.id, validatedName);
 
         if (result === 'ok') {
           socket.join(validatedRoomId);
           const player = state.players.find(p => p.id === socket.id);
           socket.emit("room:sessionInfo", { sessionId: player?.sessionId });
           io.to(validatedRoomId).emit("game:stateUpdate", state);
-          // Broadcast updated room list to all sockets
-          io.emit("room:list", listPublicRooms());
+          io.emit("room:list", await listPublicRooms());
           return;
         }
 
-        if (result === 'banned') {
-          socket.emit("room:error", { message: "Você está banido desta sala." });
-          return;
-        }
+        if (result === 'banned') { socket.emit("room:error", { message: "Você está banido desta sala." }); return; }
+        if (result === 'invalid_name') { socket.emit("room:error", { message: "Nome inválido." }); return; }
+        if (result === 'name_taken') { socket.emit("room:error", { message: "Já existe um jogador com esse nome nesta sala." }); return; }
 
-        if (result === 'invalid_name') {
-          socket.emit("room:error", { message: "Nome inválido." });
-          return;
-        }
-
-        if (result === 'name_taken') {
-          socket.emit("room:error", { message: "Já existe um jogador com esse nome nesta sala." });
-          return;
-        }
-
-        // Room is full or game in progress — try joining as spectator
         if (result === 'full' || result === 'in_progress') {
-          const spectatorState = joinAsSpectator(validatedRoomId, socket.id, validatedName);
+          const spectatorState = await joinAsSpectator(validatedRoomId, socket.id, validatedName);
           if (spectatorState) {
             socket.join(validatedRoomId);
             const player = spectatorState.players.find(p => p.id === socket.id);
@@ -368,13 +353,13 @@ io.on("connection", (socket) => {
   // ===== ROOM:REJOIN (sessão) =====
   socket.on(
     "room:rejoin",
-    ({ roomId, sessionId }: { roomId: string; sessionId: string }) => {
+    async ({ roomId, sessionId }: { roomId: string; sessionId: string }) => {
       if (!roomId || !sessionId || typeof roomId !== 'string' || typeof sessionId !== 'string'
           || roomId.length > 10 || sessionId.length > 64) {
         socket.emit("room:rejoinFailed", { message: "Dados de sessão inválidos." });
         return;
       }
-      const state = rejoinRoom(roomId, sessionId, socket.id);
+      const state = await rejoinRoom(roomId, sessionId, socket.id);
       if (!state) {
         socket.emit("room:rejoinFailed", { message: "Sala não encontrada ou sessão expirada." });
         return;
@@ -388,20 +373,19 @@ io.on("connection", (socket) => {
   );
 
   // ===== GAME:CONFIG =====
-  socket.on("game:config", ({ roomId, config }: any) => {
+  socket.on("game:config", async ({ roomId, config }: any) => {
     const state = getRoom(roomId);
     if (!state || state.hostId !== socket.id) return;
-    const updated = updateConfig(roomId, config);
+    const updated = await updateConfig(roomId, config);
     if (updated) io.to(roomId).emit("game:stateUpdate", updated);
   });
 
   // ===== GAME:START =====
-  socket.on("game:start", ({ roomId }: { roomId: string }) => {
+  socket.on("game:start", async ({ roomId }: { roomId: string }) => {
     const state = getRoom(roomId);
     if (!state || state.hostId !== socket.id) return;
-    const started = startGame(roomId);
+    const started = await startGame(roomId);
     if (started) {
-      // Limpa o flag de game_over ao iniciar um novo jogo
       gameOverRooms.delete(roomId);
       cancelGameOverTimer(roomId);
       cancelLobbyTimer(roomId);
@@ -513,7 +497,7 @@ io.on("connection", (socket) => {
             winnerId,
           });
 
-          setTimeout(() => {
+          setTimeout(async () => {
             state.resolvingTrick = false;
             state.currentTrick = [];
             state.trickState = null;
@@ -542,20 +526,22 @@ io.on("connection", (socket) => {
 
               io.to(roomId).emit("game:stateUpdate", state);
 
-              const gameWinner = checkGameOver(state.players);
-              if (gameWinner !== null) {
-                state.phase = "game_over";
-                gameOverRooms.add(roomId);
-                io.to(roomId).emit("game:over", { winnerId: gameWinner });
-                console.log(`[Round End] Game over na sala ${roomId} - vencedor: ${gameWinner}`);
-              } else {
-                setTimeout(() => {
+        const gameWinner = checkGameOver(state.players);
+          if (gameWinner !== null) {
+            state.phase = "game_over";
+            gameOverRooms.add(roomId);
+            await saveRoom(state);
+            io.to(roomId).emit("game:over", { winnerId: gameWinner });
+            startGameOverTimer(roomId);
+            console.log(`[Round End] Game over na sala ${roomId} - vencedor: ${gameWinner}`);
+          } else {
+            setTimeout(async () => {
                   // Promote spectators from queue before new round
                   const promoted: string[] = [];
                   while (state.spectatorQueue.length > 0) {
                     const activeCount = state.players.filter(p => !p.isEliminated && !p.isSpectator).length;
                     if (activeCount >= state.config.maxPlayers) break;
-                    const promotedPlayer = promoteSpectatorFromQueue(roomId);
+                    const promotedPlayer = await promoteSpectatorFromQueue(roomId);
                     if (!promotedPlayer) break;
                     promoted.push(promotedPlayer.name);
                   }
@@ -600,24 +586,19 @@ io.on("connection", (socket) => {
   );
 
   // ===== PLAYER:BECOMESPECTATOR =====
-  socket.on("player:becomeSpectator", ({ roomId }: { roomId: string }) => {
+  socket.on("player:becomeSpectator", async ({ roomId }: { roomId: string }) => {
     const state = getRoom(roomId);
     if (!state) return;
     const player = state.players.find(p => p.id === socket.id);
     if (!player) return;
 
-    // Se ainda está ativo no jogo, elimina primeiro
     if (!player.isEliminated) {
       const nextTurn = getNextPlayer(state, socket.id);
       player.isEliminated = true;
       player.lives = 0;
       state.bettingOrder = state.bettingOrder.filter(id => id !== socket.id);
-
-      if (state.currentTurn === socket.id) {
-        state.currentTurn = nextTurn;
-      }
-
-      checkAndEmitGameOver(roomId, state);
+      if (state.currentTurn === socket.id) state.currentTurn = nextTurn;
+      await checkAndEmitGameOver(roomId, state);
     }
 
     player.isSpectator = true;
@@ -626,41 +607,34 @@ io.on("connection", (socket) => {
   });
 
   // ===== ROOM:LEAVE (lobby only) =====
-  socket.on("room:leave", ({ roomId }: { roomId: string }) => {
+  socket.on("room:leave", async ({ roomId }: { roomId: string }) => {
     const state = getRoom(roomId);
     if (!state || state.phase !== "lobby") return;
-
-    const result = disconnectPlayer(roomId, socket.id);
+    const result = await disconnectPlayer(roomId, socket.id);
     socket.leave(roomId);
-
     if (result !== null) {
-      // Room still exists — persist and notify remaining players
-      saveRoom(result);
+      await saveRoom(result);
       io.to(roomId).emit("game:stateUpdate", result);
     } else {
-      // Room was deleted (last player left)
       cancelLobbyTimer(roomId);
     }
-    // Broadcast updated public room list
-    io.emit("room:list", listPublicRooms());
+    io.emit("room:list", await listPublicRooms());
   });
 
   // ===== PLAYER:QUIT =====
-  socket.on("player:quit", ({ roomId }: { roomId: string }) => {
+  socket.on("player:quit", async ({ roomId }: { roomId: string }) => {
     const state = getRoom(roomId);
     if (!state) return;
-
-    // In lobby phase, player:quit should behave like room:leave
     if (state.phase === 'lobby') {
-      const result = disconnectPlayer(roomId, socket.id);
+      const result = await disconnectPlayer(roomId, socket.id);
       socket.leave(roomId);
       if (result !== null) {
-        saveRoom(result);
+        await saveRoom(result);
         io.to(roomId).emit("game:stateUpdate", result);
       } else {
         cancelLobbyTimer(roomId);
       }
-      io.emit("room:list", listPublicRooms());
+      io.emit("room:list", await listPublicRooms());
       return;
     }
 
@@ -681,7 +655,7 @@ io.on("connection", (socket) => {
     if (activePlayers.length < 2) {
       const lastPlayer = activePlayers[0];
       state.phase = "game_over";
-      saveRoom(state);
+      await saveRoom(state);
       io.to(roomId).emit("game:over", { winnerId: lastPlayer?.id ?? null });
       startGameOverTimer(roomId);
       io.to(roomId).emit("game:stateUpdate", state);
@@ -768,7 +742,7 @@ io.on("connection", (socket) => {
   });
 
   // ===== VOTE:CAST =====
-  socket.on("vote:cast", ({ roomId }: { roomId: string }) => {
+  socket.on("vote:cast", async ({ roomId }: { roomId: string }) => {
     const state = getRoom(roomId);
     if (!state || !state.activeVoteKick) return;
 
@@ -818,7 +792,7 @@ io.on("connection", (socket) => {
       if (kickTimer) { clearTimeout(kickTimer); voteKickTimers.delete(roomId); }
 
       recalcMaxRounds(state);
-      checkAndEmitGameOver(roomId, state);
+      await checkAndEmitGameOver(roomId, state);
 
       io.to(roomId).emit("game:stateUpdate", state);
       resetAfkTimer(roomId);
@@ -826,7 +800,7 @@ io.on("connection", (socket) => {
   });
 
   // ===== HOST:BAN =====
-  socket.on("host:ban", ({ roomId, targetId }: { roomId: string; targetId: string }) => {
+  socket.on("host:ban", async ({ roomId, targetId }: { roomId: string; targetId: string }) => {
     const state = getRoom(roomId);
     if (!state || state.hostId !== socket.id) return;
     if (targetId === socket.id) return;
@@ -834,126 +808,85 @@ io.on("connection", (socket) => {
     const target = state.players.find(p => p.id === targetId);
     if (!target) return;
 
-    // Ban persistent via SQLite
-    banPlayerRoom(roomId, target.sessionId, socket.id, 'Banido pelo host');
+    await banPlayerRoom(roomId, target.sessionId, socket.id, 'Banido pelo host');
 
-    // Elimina do jogo
     const nextTurnBan = getNextPlayer(state, targetId);
     target.isEliminated = true;
     target.lives = 0;
     state.bettingOrder = state.bettingOrder.filter(id => id !== targetId);
-
-    if (state.currentTurn === targetId) {
-      state.currentTurn = nextTurnBan;
-    }
+    if (state.currentTurn === targetId) state.currentTurn = nextTurnBan;
 
     io.to(targetId).emit("game:kicked", { message: "Você foi banido pelo host." });
     io.to(roomId).emit("game:playerQuit", { playerName: target.name });
-
     recalcMaxRounds(state);
-    checkAndEmitGameOver(roomId, state);
-
+    await checkAndEmitGameOver(roomId, state);
     io.to(roomId).emit("game:stateUpdate", state);
     resetAfkTimer(roomId);
   });
 
   // ===== HOST:KICK =====
-  socket.on("host:kick", ({ roomId, targetId }: { roomId: string; targetId: string }) => {
+  socket.on("host:kick", async ({ roomId, targetId }: { roomId: string; targetId: string }) => {
     const state = getRoom(roomId);
     if (!state || state.hostId !== socket.id) return;
     if (targetId === socket.id) return;
-
     const target = state.players.find(p => p.id === targetId);
     if (!target) return;
-
     const nextTurnKick = getNextPlayer(state, targetId);
     target.isEliminated = true;
     target.lives = 0;
     target.wasKicked = true;
     state.bettingOrder = state.bettingOrder.filter(id => id !== targetId);
-
-    if (state.currentTurn === targetId) {
-      state.currentTurn = nextTurnKick;
-    }
-
+    if (state.currentTurn === targetId) state.currentTurn = nextTurnKick;
     io.to(targetId).emit("game:kicked", { message: "Você foi removido pelo host." });
     io.to(roomId).emit("game:playerQuit", { playerName: target.name });
-
     recalcMaxRounds(state);
-    checkAndEmitGameOver(roomId, state);
-
+    await checkAndEmitGameOver(roomId, state);
     io.to(roomId).emit("game:stateUpdate", state);
     resetAfkTimer(roomId);
   });
 
   // ===== CHAT:SEND =====
-  socket.on("chat:send", ({ roomId, text }: { roomId: string; text: string }) => {
+  socket.on("chat:send", async ({ roomId, text }: { roomId: string; text: string }) => {
     const state = getRoom(roomId);
     if (!state) return;
-
     const player = state.players.find(p => p.id === socket.id);
     if (!player) return;
-
-    // Rate limiting and sanitization handled in addChatMessage
-    const message = addChatMessage(roomId, socket.id, player.name, text);
-    if (message) {
-      io.to(roomId).emit("chat:message", message);
-    }
+    const message = await addChatMessage(roomId, socket.id, player.name, text);
+    if (message) io.to(roomId).emit("chat:message", message);
   });
 
   // ===== GLOBAL CHAT:SEND =====
-  socket.on("global:chat", ({ text }: { text: string }) => {
-    // Basic sanitization
+  socket.on("global:chat", async ({ text }: { text: string }) => {
     const sanitized = text
       .replace(/[<>]/g, c => ({ '<': '&lt;', '>': '&gt;' }[c] ?? c))
-      .trim()
-      .slice(0, 200);
-
+      .trim().slice(0, 200);
     if (!sanitized) return;
-
-    // Random generic name since they might not be in a room yet
     const shortId = socket.id.substring(0, 4);
     const playerName = `Visitante-${shortId}`;
-    
-    // Check rate limit using socket.id as playerId, and undefined as roomId
-    if (!checkRateLimit(socket.id, undefined, 'global_chat', 5, 30)) {
-       return; // Limit exceeded
-    }
-
-    const message = addGlobalChatMessage(socket.id, playerName, sanitized);
+    if (!await checkRateLimit(socket.id, undefined, 'global_chat', 5, 30)) return;
+    const message = await addGlobalChatMessage(socket.id, playerName, sanitized);
     io.emit('global:chat', message);
   });
 
   // ===== REACTION:SEND =====
-  socket.on("reaction:send", ({ roomId, emoji }: { roomId: string; emoji: string }) => {
+  socket.on("reaction:send", async ({ roomId, emoji }: { roomId: string; emoji: string }) => {
     const state = getRoom(roomId);
     if (!state) return;
-
     const player = state.players.find(p => p.id === socket.id);
     if (!player) return;
-
-    // Validate emoji (basic check)
-    if (!emoji || typeof emoji !== 'string' || emoji.length > 4) {
-      return;
-    }
-
-    addReaction(roomId, socket.id, emoji);
-    io.to(roomId).emit("reaction:new", {
-      playerId: socket.id,
-      playerName: player.name,
-      emoji,
-      timestamp: Date.now(),
-    });
+    if (!emoji || typeof emoji !== 'string' || emoji.length > 4) return;
+    await addReaction(roomId, socket.id, emoji);
+    io.to(roomId).emit("reaction:new", { playerId: socket.id, playerName: player.name, emoji, timestamp: Date.now() });
   });
 
   // ===== ROOM:LIST (via socket for real-time) =====
-  socket.on("room:list", () => {
-    socket.emit("room:list", listPublicRooms());
+  socket.on("room:list", async () => {
+    socket.emit("room:list", await listPublicRooms());
   });
 
   // ===== ROOM:LIST:WATCHABLE =====
-  socket.on("room:listWatchable", () => {
-    socket.emit("room:listWatchable", listWatchableRooms());
+  socket.on("room:listWatchable", async () => {
+    socket.emit("room:listWatchable", await listWatchableRooms());
   });
 
   // ===== SPECTATOR:JOINQUEUE =====
@@ -971,11 +904,11 @@ io.on("connection", (socket) => {
   });
 
   // ===== ROOM:JOIN:SPECTATOR =====
-  socket.on("room:joinAsSpectator", ({ roomId, name }: { roomId: string; name: string }) => {
+  socket.on("room:joinAsSpectator", async ({ roomId, name }: { roomId: string; name: string }) => {
     try {
       const validatedName = validatePlayerName(name);
       const validatedRoomId = validateRoomId(roomId);
-      const state = joinAsSpectator(validatedRoomId, socket.id, validatedName);
+      const state = await joinAsSpectator(validatedRoomId, socket.id, validatedName);
       if (!state) {
         socket.emit("room:error", { message: "Partida não encontrada, já encerrada ou cheia de espectadores." });
         return;
@@ -984,8 +917,7 @@ io.on("connection", (socket) => {
       const player = state.players.find(p => p.id === socket.id);
       socket.emit("room:sessionInfo", { sessionId: player?.sessionId });
       io.to(validatedRoomId).emit("game:stateUpdate", state);
-      // Broadcast updated watchable rooms (spectator count changed)
-      io.emit("room:listWatchable", listWatchableRooms());
+      io.emit("room:listWatchable", await listWatchableRooms());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao entrar como espectador';
       socket.emit("room:error", { message });
@@ -993,7 +925,7 @@ io.on("connection", (socket) => {
   });
 
   // ===== DISCONNECT =====
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
     console.log(`❌ Desconectado: ${socket.id}`);
     voteInitiateCooldowns.delete(socket.id);
     try {
@@ -1007,17 +939,14 @@ io.on("connection", (socket) => {
         console.log(`[Disconnect] Jogador ${player.name} desconectado da sala ${roomId} (fase: ${state.phase})`);
 
         if (state.phase === "lobby") {
-          // No lobby: remove imediatamente
-          const lobbyResult = disconnectPlayer(roomId, socket.id);
+          const lobbyResult = await disconnectPlayer(roomId, socket.id);
           if (lobbyResult === null) {
-            // Room deleted — cancel lobby timer
             cancelLobbyTimer(roomId);
           } else {
-            saveRoom(lobbyResult);
+            await saveRoom(lobbyResult);
             io.to(roomId).emit("game:stateUpdate", lobbyResult);
           }
-          // Broadcast updated room list
-          io.emit("room:list", listPublicRooms());
+          io.emit("room:list", await listPublicRooms());
           break;
         }
 
@@ -1029,7 +958,7 @@ io.on("connection", (socket) => {
           const stillConnected = state.players.filter(q => q.connected);
           if (stillConnected.length === 0) {
             cancelGameOverTimer(roomId);
-            deleteRoom(roomId);
+            await deleteRoom(roomId);
             gameOverRooms.delete(roomId);
             io.to(roomId).emit('room:closed');
             console.log(`[Disconnect] Sala ${roomId} fechada imediatamente - todos desconectaram`);
@@ -1038,7 +967,7 @@ io.on("connection", (socket) => {
         }
 
         // Em jogo: marca como desconectado, inicia timer de 30s
-        disconnectPlayer(roomId, socket.id, () => {
+        disconnectPlayer(roomId, socket.id, async () => {
           try {
             // Timer expirou — jogador é eliminado
             console.log(`[Disconnect] Timer expirado para jogador ${player.name} na sala ${roomId}`);
@@ -1078,7 +1007,7 @@ io.on("connection", (socket) => {
             }
 
             recalcMaxRounds(freshState);
-            checkAndEmitGameOver(roomId, freshState);
+            await checkAndEmitGameOver(roomId, freshState);
 
             io.to(roomId).emit("game:stateUpdate", freshState);
             io.to(roomId).emit("game:playerQuit", { playerName: player.name });
