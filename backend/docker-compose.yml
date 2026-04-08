@@ -1,17 +1,34 @@
-version: '3.8'
-
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fodinha-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fodinha}
+      POSTGRES_USER: ${POSTGRES_USER:-fodinha}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fodinha}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build: .
     container_name: fodinha-backend
     restart: always
     ports:
       - "3001:3001"
-    volumes:
-      - sqlite_data:/app/data
     environment:
-      - NODE_ENV=production
-      - PORT=3001
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fodinha}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fodinha}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   caddy:
     image: caddy:latest
@@ -23,9 +40,30 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
-    command: caddy reverse-proxy --from 104.248.238.227.nip.io --to fodinha-backend:3001
+    command: caddy reverse-proxy --from ${DOMAIN:?Defina DOMAIN no .env} --to fodinha-backend:3001
+    depends_on:
+      - backend
+
+  # ─── pgAdmin (apenas com: docker compose --profile db-admin up) ───────────
+  pgadmin:
+    profiles:
+      - db-admin
+    image: dpage/pgadmin4:latest
+    container_name: fodinha-pgadmin
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@fodinha.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?Defina PGADMIN_PASSWORD no .env}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
 
 volumes:
-  sqlite_data:
+  postgres_data:
   caddy_data:
   caddy_config:
+  pgadmin_data:
