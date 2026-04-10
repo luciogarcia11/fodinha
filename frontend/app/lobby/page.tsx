@@ -126,7 +126,11 @@ function LobbyContent() {
                 type="checkbox"
                 className="w-5 h-5 accent-yellow-400"
                 checked={gameState.config.fdpRule}
-                onChange={(e) => updateConfig({ fdpRule: e.target.checked })}
+                onChange={(e) => updateConfig({
+                  fdpRule: e.target.checked,
+                  forceTwoDecks: e.target.checked,
+                  insanityMode: false,
+                })}
               />
             ) : (
               <span
@@ -137,9 +141,9 @@ function LobbyContent() {
             )}
           </div>
 
-          {/* Opção exclusiva Regra FDP: começar com baralho duplo */}
-          {gameState.config.fdpRule && (
-            <div className="flex items-center justify-between pl-4 border-l-2 border-yellow-400/40">
+          {/* Opções exclusivas Regra FDP — sempre visíveis, desabilitadas se FDP inativa */}
+          <div className={`flex flex-col gap-3 pl-4 border-l-2 transition-opacity ${gameState.config.fdpRule ? "border-yellow-400/40 opacity-100" : "border-white/10 opacity-40 pointer-events-none"}`}>
+            <div className="flex items-center justify-between">
               <div className="flex flex-col">
                 <span className="text-sm">Começar com 2 baralhos</span>
                 <span className="text-[10px] text-white/40">Se desmarcado, usa 1 baralho até precisar de 2</span>
@@ -149,6 +153,7 @@ function LobbyContent() {
                   type="checkbox"
                   className="w-5 h-5 accent-yellow-400 ml-3 shrink-0"
                   checked={gameState.config.fdpStartDoubleDeck ?? false}
+                  disabled={!gameState.config.fdpRule}
                   onChange={(e) => updateConfig({ fdpStartDoubleDeck: e.target.checked })}
                 />
               ) : (
@@ -157,42 +162,43 @@ function LobbyContent() {
                 </span>
               )}
             </div>
-          )}
 
-          {/* Escala de baralhos */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm">Usar somente 2 baralhos</span>
-            {isHost ? (
-              <input
-                type="checkbox"
-                className="w-5 h-5 accent-yellow-400"
-                checked={gameState.config.forceTwoDecks ?? false}
-                onChange={(e) => updateConfig({ forceTwoDecks: e.target.checked, insanityMode: false })}
-              />
-            ) : (
-              <span className={`text-sm font-bold ${gameState.config.forceTwoDecks ? "text-green-400" : "text-white/40"}`}>
-                {gameState.config.forceTwoDecks ? "✓ Ativa" : "✗ Inativa"}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col">
-              <span className="text-sm">Modo Insanidade 🃏</span>
-              <span className="text-[10px] text-white/40">Escala até 7 baralhos (cores distintas)</span>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Usar somente 2 baralhos</span>
+              {isHost ? (
+                <input
+                  type="checkbox"
+                  className="w-5 h-5 accent-yellow-400"
+                  checked={gameState.config.forceTwoDecks ?? false}
+                  disabled={!gameState.config.fdpRule}
+                  onChange={(e) => updateConfig({ forceTwoDecks: e.target.checked, insanityMode: false })}
+                />
+              ) : (
+                <span className={`text-sm font-bold ${gameState.config.forceTwoDecks ? "text-green-400" : "text-white/40"}`}>
+                  {gameState.config.forceTwoDecks ? "✓ Ativa" : "✗ Inativa"}
+                </span>
+              )}
             </div>
-            {isHost ? (
-              <input
-                type="checkbox"
-                className="w-5 h-5 accent-yellow-400 ml-3 shrink-0"
-                checked={gameState.config.insanityMode ?? false}
-                onChange={(e) => updateConfig({ insanityMode: e.target.checked, forceTwoDecks: false })}
-              />
-            ) : (
-              <span className={`text-sm font-bold ml-3 ${gameState.config.insanityMode ? "text-green-400" : "text-white/40"}`}>
-                {gameState.config.insanityMode ? "✓ Ativa" : "✗ Inativa"}
-              </span>
-            )}
+
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col">
+                <span className="text-sm">Modo Insanidade 🃏</span>
+                <span className="text-[10px] text-white/40">Escala até 7 baralhos (cores distintas)</span>
+              </div>
+              {isHost ? (
+                <input
+                  type="checkbox"
+                  className="w-5 h-5 accent-yellow-400 ml-3 shrink-0"
+                  checked={gameState.config.insanityMode ?? false}
+                  disabled={!gameState.config.fdpRule}
+                  onChange={(e) => updateConfig({ insanityMode: e.target.checked, forceTwoDecks: false })}
+                />
+              ) : (
+                <span className={`text-sm font-bold ml-3 ${gameState.config.insanityMode ? "text-green-400" : "text-white/40"}`}>
+                  {gameState.config.insanityMode ? "✓ Ativa" : "✗ Inativa"}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-between">

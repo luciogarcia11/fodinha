@@ -358,6 +358,13 @@ export function updateConfig(roomId: string, config: Partial<GameConfig>): GameS
   if (config.maxPlayers !== undefined) {
     config.maxPlayers = Math.max(2, Math.min(20, Math.floor(config.maxPlayers)));
   }
+  // Opções exclusivas da Regra FDP: bloqueadas se fdpRule não estiver ativa
+  const effectiveFdpRule = config.fdpRule !== undefined ? config.fdpRule : state.config.fdpRule;
+  if (!effectiveFdpRule) {
+    config.forceTwoDecks = false;
+    config.insanityMode = false;
+    config.fdpStartDoubleDeck = false;
+  }
   state.config = { ...state.config, ...config };
   saveRoom(state);
   return state;
