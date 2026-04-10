@@ -93,6 +93,7 @@ export function createRoom(hostId: string, hostName: string): GameState {
     bannedIds: [],
     chatMessages: [],
     spectatorQueue: [],
+    eliminatedSessionIds: [],
   };
 
   rooms.set(roomId, state);
@@ -220,6 +221,8 @@ export function rejoinRoom(roomId: string, sessionId: string, newSocketId: strin
 
   if (!liveState) {
     rooms.set(roomId, state);
+    // Backfill field absent in older DB rows
+    if (!state.eliminatedSessionIds) state.eliminatedSessionIds = [];
     console.log(`[Rejoin] Sala ${roomId} carregada do banco para jogador ${newSocketId} - chatMessages: ${state.chatMessages.length}`);
   }
 
@@ -426,6 +429,8 @@ export function disconnectPlayer(
         console.log(`[Disconnect Timer] Eliminando jogador ${playerName} por timeout na sala ${roomId}`);
         currentPlayer.isEliminated = true;
         currentPlayer.lives = 0;
+        // Registra a sessão como eliminada para bloquear reentrada na fila
+        registerElimination(roomId, sessionId);
 
         if (onEliminate) {
           onEliminate();
@@ -663,6 +668,18 @@ export function banPlayer(roomId: string, sessionId: string, bannedBy: string, r
 }
 
 /**
+ * Registra a sessionId de um jogador eliminado durante a partida.
+ * Impede que essa sessão entre na fila de espectadores para jogar novamente.
+ */
+export function registerElimination(roomId: string, sessionId: string): void {
+  const state = rooms.get(roomId);
+  if (!state) return;
+  if (!state.eliminatedSessionIds.includes(sessionId)) {
+    state.eliminatedSessionIds.push(sessionId);
+  }
+}
+
+/**
  * Adiciona espectador à fila de entrada.
  */
 export function joinSpectatorQueue(roomId: string, playerId: string): number {
@@ -671,6 +688,9 @@ export function joinSpectatorQueue(roomId: string, playerId: string): number {
 
   const player = state.players.find(p => p.id === playerId);
   if (!player || !player.isSpectator) return -1;
+
+  // Bloqueia sessões que foram eliminadas durante esta partida
+  if (state.eliminatedSessionIds.includes(player.sessionId)) return -2;
 
   if (state.spectatorQueue.includes(playerId)) {
     return state.spectatorQueue.indexOf(playerId) + 1;

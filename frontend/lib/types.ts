@@ -91,6 +91,7 @@ export interface GameState {
   activeVoteKick: VoteKick | null;
   bannedIds: string[];
   spectatorQueue: string[];
+  eliminatedSessionIds: string[];
 }
 
 export interface TrickResult {

@@ -27,6 +27,7 @@ import {
   promoteSpectatorFromQueue,
   getSpectatorQueuePositions,
   recalcMaxRounds,
+  registerElimination,
 } from "./game/roomManager";
 import {
   resolveVaza,
@@ -240,6 +241,7 @@ function handleAfkKick(roomId: string) {
     target.isEliminated = true;
     target.lives = 0;
     target.wasKicked = true;
+    registerElimination(roomId, target.sessionId);
   
   if (state.phase === "betting") {
     const idx = state.bettingOrder.indexOf(targetId);
@@ -528,6 +530,12 @@ io.on("connection", (socket) => {
               state.players = updatedPlayers;
               state.phase = "round_end";
 
+              // Registra sessões eliminadas nesta rodada para bloquear reentrada na fila
+              for (const eliminatedId of eliminated) {
+                const ep = state.players.find(p => p.id === eliminatedId);
+                if (ep) registerElimination(roomId, ep.sessionId);
+              }
+
               state.players = [...state.players];
 
               // Filtra apenas jogadores que não foram eliminados nesta rodada
@@ -611,6 +619,7 @@ io.on("connection", (socket) => {
       const nextTurn = getNextPlayer(state, socket.id);
       player.isEliminated = true;
       player.lives = 0;
+      registerElimination(roomId, player.sessionId);
       state.bettingOrder = state.bettingOrder.filter(id => id !== socket.id);
 
       if (state.currentTurn === socket.id) {
@@ -673,6 +682,7 @@ io.on("connection", (socket) => {
     if (player) {
       player.isEliminated = true;
       player.lives = 0;
+      registerElimination(roomId, player.sessionId);
     }
     socket.leave(roomId);
 
@@ -798,6 +808,7 @@ io.on("connection", (socket) => {
         targetPlayer.isEliminated = true;
         targetPlayer.lives = 0;
         targetPlayer.wasKicked = true;
+        registerElimination(roomId, targetPlayer.sessionId);
         state.bettingOrder = state.bettingOrder.filter(id => id !== vote.targetId);
 
         // Se era a vez dele, avança
@@ -841,6 +852,7 @@ io.on("connection", (socket) => {
     const nextTurnBan = getNextPlayer(state, targetId);
     target.isEliminated = true;
     target.lives = 0;
+    registerElimination(roomId, target.sessionId);
     state.bettingOrder = state.bettingOrder.filter(id => id !== targetId);
 
     if (state.currentTurn === targetId) {
@@ -870,6 +882,7 @@ io.on("connection", (socket) => {
     target.isEliminated = true;
     target.lives = 0;
     target.wasKicked = true;
+    registerElimination(roomId, target.sessionId);
     state.bettingOrder = state.bettingOrder.filter(id => id !== targetId);
 
     if (state.currentTurn === targetId) {
@@ -959,6 +972,10 @@ io.on("connection", (socket) => {
   // ===== SPECTATOR:JOINQUEUE =====
   socket.on("spectator:joinQueue", ({ roomId }: { roomId: string }) => {
     const position = joinSpectatorQueue(roomId, socket.id);
+    if (position === -2) {
+      socket.emit("room:error", { message: "Você foi eliminado nesta partida e não pode entrar na fila para jogar novamente." });
+      return;
+    }
     if (position > 0) {
       io.to(roomId).emit("spectator:queueUpdate", getSpectatorQueuePositions(roomId));
     }
@@ -1059,6 +1076,7 @@ io.on("connection", (socket) => {
             const nextTurnDisc = getNextPlayer(freshState, socket.id);
             freshPlayer.isEliminated = true;
             freshPlayer.lives = 0;
+            registerElimination(roomId, freshPlayer.sessionId);
 
             const activePlayers = freshState.players.filter(p => !p.isEliminated);
 

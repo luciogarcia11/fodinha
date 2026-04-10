@@ -164,6 +164,7 @@ export function loadRoom(roomId: string): GameState | null {
     bannedIds: getBannedPlayers(roomId),
     chatMessages,
     spectatorQueue: [],
+    eliminatedSessionIds: [],
   };
 }
 

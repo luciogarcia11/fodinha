@@ -94,4 +94,5 @@ export interface GameState {
   bannedIds: string[];
   chatMessages: ChatMessage[];
   spectatorQueue: string[];
+  eliminatedSessionIds: string[];  // Sessions que foram eliminadas durante a partida
 }
